@@ -1,0 +1,23 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Policy and global-rule tests
+        run: |
+          node scripts/test-policy.mjs
+          node packages/workspace-scope/test/global-rules-smoke.mjs
+      - name: Memory tests
+        working-directory: packages/dsh-meow-scope
+        run: |
+          npm install --no-audit --no-fund
+          npm test

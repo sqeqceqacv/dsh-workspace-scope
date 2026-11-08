@@ -1,0 +1,1218 @@
+/**
+ * meow-memory v2 — SQLite 数据层。
+ *
+ * 每 level 一表（用户拍板：各层数据结构需求不同）：
+ *   soul / user — 无特化列，少而精；
+ *   project     — project 名必填（多项目分存）+ subcategory 子类；
+ *   fact        — 细碎原子事实，可选 project 归属；
+ *   lesson      — corrected 标记 + 可选 project 归属；
+ *   topic       — title 必填 + goal 目标句（切换判定参照系）。
+ *
+ * id = 时间前缀（base36 毫秒 + 随机后缀，36 字符）：id 排序即创建顺序。
+ * updated_at = 记忆时间戳（最后更新时间：dream 封存或 memory_update 刷新；对外显示"记忆时间戳"）。
+ * 驱动：node:sqlite（Node ≥22.5 内置，宿主 @deepseek-ai/dsh-storage-sqlite 同款）。
+ */
+
+import { randomUUID } from 'node:crypto'
+import { existsSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
+import { fillTemplate, getPromptLang, keyedValue } from './prompt-loader.js'
+
+export type Level = 'soul' | 'project' | 'fact' | 'lesson' | 'topic' | 'rules'
+export type Status = 'active' | 'archived' | 'stale'
+/** What the memory is for. Tooling memories are workspace-local operational
+ *  experience and bypass the content-theme judge. */
+export type Domain = 'content' | 'tooling'
+export const DOMAINS: readonly Domain[] = ['content', 'tooling']
+
+export const LEVELS: readonly Level[] = ['soul', 'project', 'fact', 'lesson', 'topic', 'rules']
+
+/** project 子类（用户拍板）：目标概述/项目结构/技术决策/用户原话/部署与数据/进行中。 */
+export const PROJECT_SUBCATEGORIES = ['overview', 'structure', 'decisions', 'quotes', 'ops', 'todo'] as const
+export type ProjectSubcategory = (typeof PROJECT_SUBCATEGORIES)[number]
+
+/** topic 之外的 level 不强制 title；project 需 project 名；lesson 用 corrected。 */
+export const LEVEL_LABELS: Record<Level, string> = {
+  soul: 'AI 自身',
+  project: '项目',
+  fact: '原子事实',
+  lesson: '错误与教训',
+  topic: '话题',
+  rules: '设计原则与行为准则',
+}
+
+/** 框架词（labels.md）：注入块与 memory_project 正文里的短词随语言包走。 */
+const lbl = (key: string, params?: Record<string, string>): string => fillTemplate(keyedValue('labels', key), params)
+
+/** 相对时间显示（"记忆时间戳"人性化）。文案外置：labels.md 的 time.*。 */
+export function relativeTime(ms: number | null | undefined): string {
+  if (!ms) return lbl('time.none')
+  const diff = Date.now() - ms
+  if (diff < 60_000) return lbl('time.justNow')
+  if (diff < 3600_000) return lbl('time.minutes', { n: String(Math.floor(diff / 60_000)) })
+  if (diff < 86_400_000) return lbl('time.hours', { n: String(Math.floor(diff / 3600_000)) })
+  if (diff < 30 * 86_400_000) return lbl('time.days', { n: String(Math.floor(diff / 86_400_000)) })
+  return new Date(ms).toISOString().slice(0, 10)
+}
+
+/** 工作区通用标记的历史真值（zh 语言包的写法；仅表示本工作区内跨项目，不跨工作区）。语言包切换后老库里存的仍是它，永远认。 */
+export const GLOBAL_PROJECT_CANON = '全局'
+
+/** 语言 → 全局标记的进程级缓存。此值走 projectCovers/projectList，命中链路每条
+ *  用户消息都要按它过滤整库（几百条），逐条读文件解析会把热路径拖到 10ms 量级——
+ *  这一个键按语言缓存（切语言即失效）。代价：改 labels.md 的 project.global 需要
+ *  切一次语言或重启才生效；它是语义标记不是可随手改的文案，这个取舍是划算的。 */
+let markerCache: { lang: string; marker: string } | null = null
+
+/** 当前语言包的全局标记（labels.md 的 project.global；en = "global"）。
+ *  这是模型按 prompt 写进 project 字段的字面值，所以必须随语言走——否则
+ *  英文包里模型写的 "global" 会被当成一个叫 global 的项目：全局 rules 不再
+ *  注入、项目列表里凭空多出一个项目。
+ *  取不到（实例覆盖层的 labels.md 是老版本、缺键）时回退真值：全局判定是检索
+ *  热路径的语义，不能因为一个文案文件过期就 throw 掉整条注入链路。 */
+export function globalProjectMarker(): string {
+  const lang = getPromptLang()
+  if (markerCache !== null && markerCache.lang === lang) return markerCache.marker
+  let marker: string
+  try {
+    marker = lbl('project.global')
+  } catch {
+    marker = GLOBAL_PROJECT_CANON
+  }
+  markerCache = { lang, marker }
+  return marker
+}
+
+/** 全局标记的英文真值（en 语言包 labels.md 的 project.global 写法）。与中文真值一样
+ *  永久认——中英混写的历史库里 "global" 曾按字面值落库，不认它就会退化成一条叫
+ *  global 的假项目。2026-09-19 用户拍板：全局 / global / null 都要当全局。 */
+export const GLOBAL_PROJECT_CANON_EN = 'global'
+
+/** 是否全局标记（中文真值 + 英文真值 + 当前语言包写法：跨语言切换后新旧条目都要认）。
+ *  容忍首尾空白与大小写：模型照 prompt 写字面值，英文里 "Global"/"global " 都会出现，
+ *  漏认一次就是一条本该全局的记忆退化成一个假项目——宁可宽。 */
+export function isGlobalProject(field: string | null): boolean {
+  if (field === null) return false
+  const trimmed = field.trim()
+  if (trimmed === GLOBAL_PROJECT_CANON) return true
+  if (trimmed.toLowerCase() === GLOBAL_PROJECT_CANON_EN) return true
+  return trimmed.toLowerCase() === globalProjectMarker().toLowerCase()
+}
+
+/** 是否「全局适用」：未标记（null）、空串、任何全局标记（全局 / global / 当前语言写法）都算。
+ *  首轮 rules 注入与关键词命中链路共用这一口径——2026-09-19 用户拍板「全局、global、null
+ *  都注入」；修前 inject.ts 首轮过滤只认 project === null，于是按文档写"全局"的准则反而
+ *  永不注入（口径 bug：父级库 15 条标"全局"的 rules 含 push 红线一直没进过首轮）。 */
+export function isGlobalScope(field: string | null): boolean {
+  if (field === null) return true
+  const trimmed = field.trim()
+  return trimmed === '' || isGlobalProject(trimmed)
+}
+
+/** project 字段 → 项目名列表（逗号分隔多值，兼容单值；全局标记/空 = 无具体项目）。 */
+export function projectList(field: string | null): string[] {
+  if (!field || isGlobalProject(field)) return []
+  return field.split(',').map((s) => s.trim()).filter((s) => s.length > 0)
+}
+
+/** project 字段是否覆盖某项目名（多值包含判断；null/全局标记 = 全局适用任何项目）。 */
+export function projectCovers(field: string | null, name: string): boolean {
+  if (field === null || isGlobalProject(field)) return true
+  return projectList(field).includes(name)
+}
+
+/** project 字段的展示标签：本工作区通用标记=工作区内跨项目（按当前语言显示）；null/''=未标记；多值 join '/'（如 dsh/project-a）。 */
+export function projectLabel(field: string | null): string {
+  if (isGlobalProject(field)) {
+    try { return lbl('project.globalDisplay') } catch { return globalProjectMarker() }
+  }
+  if (field === null || field === '') return lbl('project.unlabeled')
+  return projectList(field).join('/')
+}
+
+export interface MemoryRow {
+  id: string
+  level: Level
+  domain: Domain
+  title: string | null
+  content: string
+  importance: number // 数字即可不设上限（软引导 1-4；高 importance 豁免遗忘权重）
+  keywords: string[] // JSON 数组，写入时 bigram 自动提取
+  status: Status
+  corrected: number // lesson 专用：来自用户纠正
+  project: string | null // project 必填；fact/lesson 可选
+  subcategory: ProjectSubcategory | null // project 专用
+  goal: string | null // topic 专用：目标句
+  source_session: string | null
+  hit_count: number
+  created_at: number
+  updated_at: number // 记忆时间戳 = 最后更新时间（dream 封存或 memory_update 刷新）
+  last_accessed_at: number | null
+  theme_match: number | null
+}
+
+export interface MemoryPatch {
+  domain?: Domain
+  content?: string
+  title?: string | null
+  importance?: number
+  keywords?: string[]
+  status?: Status
+  corrected?: number
+  project?: string | null
+  subcategory?: ProjectSubcategory | null
+  goal?: string | null
+}
+
+export interface QuarantineRow {
+  id: string
+  level: Level
+  domain: Domain
+  title: string | null
+  content: string
+  importance: number
+  keywords: string[]
+  status: Status
+  corrected: number
+  project: string | null
+  subcategory: ProjectSubcategory | null
+  goal: string | null
+  source_session: string | null
+  hit_count: number
+  created_at: number
+  updated_at: number
+  last_accessed_at: number | null
+  theme: string | null
+  theme_match: number | null
+  reason: string | null
+  /** judge = rejected/uncertain by the theme judge; manual = queued by manual review mode. */
+  origin: 'judge' | 'manual'
+  operation: 'create' | 'update' | null
+  target_id: string | null
+  patch: string | null
+}
+
+export interface ThemeProposal {
+  id: string
+  theme: string
+  reason: string | null
+  source_session: string | null
+  status: string
+  created_at: number
+  decided_at: number | null
+}
+
+/** 时间前缀 id：base36(毫秒,9位) + '-' + 26 位随机 = 36 字符，id 排序 ≈ 创建顺序。 */
+export function newId(now = Date.now()): string {
+  const t = now.toString(36).padStart(9, '0')
+  return t + '-' + randomUUID().replace(/-/g, '').slice(0, 26)
+}
+
+const COMMON_COLS = `
+  id TEXT PRIMARY KEY,
+  domain TEXT NOT NULL DEFAULT 'content',
+  title TEXT,
+  content TEXT NOT NULL,
+  importance INTEGER NOT NULL DEFAULT 1,
+  keywords TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'active',
+  source_session TEXT,
+  hit_count INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  last_accessed_at INTEGER,
+  theme_match INTEGER
+`
+
+/** level → 建表语句（差异列按层特化）。表名来自 LEVELS 枚举，不拼外部输入。 */
+const SCHEMAS: Record<Level, string> = {
+  soul: `CREATE TABLE IF NOT EXISTS soul (${COMMON_COLS})`,
+  project: `CREATE TABLE IF NOT EXISTS project (${COMMON_COLS},
+    project TEXT NOT NULL,
+    subcategory TEXT)`,
+  fact: `CREATE TABLE IF NOT EXISTS fact (${COMMON_COLS},
+    project TEXT)`,
+  lesson: `CREATE TABLE IF NOT EXISTS lesson (${COMMON_COLS},
+    corrected INTEGER NOT NULL DEFAULT 0,
+    project TEXT)`,
+  topic: `CREATE TABLE IF NOT EXISTS topic (${COMMON_COLS},
+    goal TEXT,
+    project TEXT)`,
+  rules: `CREATE TABLE IF NOT EXISTS rules (${COMMON_COLS},
+    project TEXT)`, // project 可空：null=全局准则（高 importance 全量注入），非空=项目特定（memory_project 注入）
+}
+
+/** 记忆库路径：workspace 是项目根（cwd），目录名单独传（防双拼）。 */
+export function memoryDbPath(workspace: string, dir = '.dsh-scope'): string {
+  return join(workspace, dir, 'memory.db')
+}
+
+export class MemoryDb {
+  private readonly db: DatabaseSync
+
+  constructor(path: string) {
+    mkdirSync(dirname(path), { recursive: true })
+    this.db = new DatabaseSync(path)
+    this.db.exec('PRAGMA journal_mode = WAL')
+    // 多实例共享同一 memory.db 是设计内场景（dream.ts 跨实例注释、claimCheckGate）。
+    // node:sqlite 默认 busy_timeout=0：写锁冲突 0ms 直接抛 "database is locked"（2026-09-10
+    // 实测探针）。WAL 下自旋等待 5s，绝大多数瞬时争用直接消失；超时仍抛由上层兜底。
+    this.db.exec('PRAGMA busy_timeout = 5000')
+    for (const level of LEVELS) this.db.exec(SCHEMAS[level])
+    this.db.exec(`CREATE TABLE IF NOT EXISTS dream_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_at INTEGER NOT NULL,
+      summary TEXT,
+      changes TEXT,
+      note TEXT
+    )`)
+    this.db.exec(`CREATE TABLE IF NOT EXISTS windows (
+      session_id TEXT PRIMARY KEY,
+      workspace TEXT,
+      last_event_time INTEGER,
+      last_dream_time INTEGER,
+      dream_owner TEXT,
+      dream_started_at INTEGER,
+      dream_progress_at INTEGER,
+      dream_group_idx INTEGER,
+      dream_T INTEGER
+    )`)
+    this.db.exec(`CREATE TABLE IF NOT EXISTS dream_meta (
+      key TEXT PRIMARY KEY,
+      value INTEGER
+    )`)
+    this.db.exec(`CREATE TABLE IF NOT EXISTS dream_skip (
+      session_id TEXT PRIMARY KEY,
+      created_at INTEGER NOT NULL,
+      skip_dream INTEGER NOT NULL DEFAULT 1,
+      skip_inject INTEGER NOT NULL DEFAULT 0,
+      skip_write INTEGER NOT NULL DEFAULT 0
+    )`)
+    // ── theme gate / quarantine / theme proposal scaffolding ────────────────
+    // Main memory tables only receive judge-approved writes once a theme is
+    // configured.  quarantine keeps rejected/uncertain writes out of automatic
+    // injection, while theme_proposals holds the model-proposed workspace theme.
+    this.db.exec(`CREATE TABLE IF NOT EXISTS quarantine (
+      id TEXT PRIMARY KEY,
+      level TEXT NOT NULL,
+      domain TEXT NOT NULL DEFAULT 'content',
+      title TEXT,
+      content TEXT NOT NULL,
+      importance INTEGER NOT NULL DEFAULT 1,
+      keywords TEXT NOT NULL DEFAULT '[]',
+      status TEXT NOT NULL DEFAULT 'active',
+      corrected INTEGER NOT NULL DEFAULT 0,
+      project TEXT,
+      subcategory TEXT,
+      goal TEXT,
+      source_session TEXT,
+      hit_count INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      last_accessed_at INTEGER,
+      theme TEXT,
+      theme_match INTEGER,
+      reason TEXT,
+      origin TEXT NOT NULL DEFAULT 'judge',
+      operation TEXT,
+      target_id TEXT,
+      patch TEXT
+    )`)
+    this.db.exec(`CREATE TABLE IF NOT EXISTS theme_proposals (
+      id TEXT PRIMARY KEY,
+      theme TEXT NOT NULL,
+      reason TEXT,
+      source_session TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at INTEGER NOT NULL,
+      decided_at INTEGER
+    )`)
+    this.db.exec(`CREATE TABLE IF NOT EXISTS workspace_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`)
+    this.upgrade()
+  }
+
+  /** 幂等升级：缺列补列；旧 UUID id 按 created_at 重排为时间前缀 id；
+   *  v0.7.0：dream_at 列并入 updated_at（记忆时间戳=最后更新时间）后删除。 */
+  private upgrade(): void {
+    for (const level of LEVELS) {
+      const cols = new Set(
+        (this.db.prepare(`PRAGMA table_info(${level})`).all() as Array<{ name: string }>).map((c) => c.name),
+      )
+      if (cols.has('dream_at')) {
+        // 旧库：记忆时间戳数据合并进 updated_at（取两者较新值），再删 dream_at 列。
+        this.db.exec(`UPDATE ${level} SET updated_at = MAX(COALESCE(updated_at, 0), COALESCE(dream_at, 0)) WHERE dream_at IS NOT NULL`)
+        this.db.exec(`ALTER TABLE ${level} DROP COLUMN dream_at`)
+      }
+      if (level === 'project' && !cols.has('subcategory')) {
+        this.db.exec('ALTER TABLE project ADD COLUMN subcategory TEXT')
+      }
+      if (level === 'topic' && !cols.has('project')) {
+        this.db.exec('ALTER TABLE topic ADD COLUMN project TEXT')
+      }
+      if (!cols.has('theme_match')) {
+        this.db.exec(`ALTER TABLE ${level} ADD COLUMN theme_match INTEGER`)
+      }
+      if (!cols.has('domain')) {
+        this.db.exec(`ALTER TABLE ${level} ADD COLUMN domain TEXT NOT NULL DEFAULT 'content'`)
+      }
+      // 旧 UUID（不以 9 位时间前缀开头）→ 按 created_at 重写 id
+      const legacy = this.db.prepare(`SELECT id FROM ${level}`).all() as Array<{ id: string }>
+      for (const { id } of legacy) {
+        if (/^[0-9a-z]{9}-/.test(id)) continue
+        const created = (this.db.prepare(`SELECT created_at FROM ${level} WHERE id = ?`).get(id) as { created_at: number }).created_at
+        this.db.prepare(`UPDATE ${level} SET id = ? WHERE id = ?`).run(newId(created), id)
+      }
+    }
+    // windows 表：v0.10.0 起用租约（dream_owner/progress_at/...）替代 dream_pending 布尔。
+    // 老库补列；老「dream_pending=1」迁移为「过期租约」——下个检查周期按租约过期补收尾。
+    const wCols = new Set(
+      (this.db.prepare('PRAGMA table_info(windows)').all() as Array<{ name: string }>).map((c) => c.name),
+    )
+    for (const [col, ddl] of [
+      ['dream_owner', 'TEXT'],
+      ['dream_started_at', 'INTEGER'],
+      ['dream_progress_at', 'INTEGER'],
+      ['dream_group_idx', 'INTEGER'],
+      ['dream_T', 'INTEGER'],
+    ] as const) {
+      if (!wCols.has(col)) this.db.exec(`ALTER TABLE windows ADD COLUMN ${col} ${ddl}`)
+    }
+    if (wCols.has('dream_pending')) {
+      this.db.exec(`UPDATE windows SET dream_owner = 'legacy-pending', dream_started_at = 0, dream_progress_at = 0, dream_group_idx = 0, dream_T = last_event_time WHERE dream_pending = 1 AND dream_owner IS NULL`)
+    }
+    // dream_skip 表：v0.30.0 起升级为「记忆参与门控」（issue #38）——原有「跳过 dream」
+    // 语义显式化为 skip_dream 列，新增 skip_inject / skip_write。老库补列：存量行的
+    // 语义就是「跳过 dream」（旧行仅在该语义下产生），skip_dream 补默认 1 正确。
+    const sCols = new Set(
+      (this.db.prepare('PRAGMA table_info(dream_skip)').all() as Array<{ name: string }>).map((c) => c.name),
+    )
+    for (const [col, ddl] of [
+      ['skip_dream', 'INTEGER NOT NULL DEFAULT 1'],
+      ['skip_inject', 'INTEGER NOT NULL DEFAULT 0'],
+      ['skip_write', 'INTEGER NOT NULL DEFAULT 0'],
+    ] as const) {
+      if (!sCols.has(col)) this.db.exec(`ALTER TABLE dream_skip ADD COLUMN ${col} ${ddl}`)
+    }
+
+    const qCols = new Set(
+      (this.db.prepare('PRAGMA table_info(quarantine)').all() as Array<{ name: string }>).map((c) => c.name),
+    )
+    if (!qCols.has('domain')) {
+      this.db.exec("ALTER TABLE quarantine ADD COLUMN domain TEXT NOT NULL DEFAULT 'content'")
+    }
+    if (!qCols.has('origin')) {
+      this.db.exec("ALTER TABLE quarantine ADD COLUMN origin TEXT NOT NULL DEFAULT 'judge'")
+    }
+    for (const [col, ddl] of [
+      ['operation', 'TEXT'],
+      ['target_id', 'TEXT'],
+      ['patch', 'TEXT'],
+    ] as const) {
+      if (!qCols.has(col)) this.db.exec(`ALTER TABLE quarantine ADD COLUMN ${col} ${ddl}`)
+    }
+  }
+
+  /** 新库（memories 全空）判定：迁移只在库刚创建时执行一次。 */
+  isFresh(): boolean {
+    const row = this.db.prepare('SELECT COUNT(*) AS n FROM soul').get() as { n: number }
+    return row.n === 0
+  }
+
+  /** VACUUM INTO 一致性快照到目标路径（#37 可选备份；目标已存在会抛，调用方先轮转）。
+   *  WAL 下安全：快照含 WAL 内容，读连接一致性由 SQLite 保证。 */
+  vacuumInto(target: string): void {
+    this.db.exec(`VACUUM INTO '${target.replace(/'/g, "''")}'`)
+  }
+
+  insert(row: { level: Level; content: string } & Partial<MemoryRow>): MemoryRow {
+    const now = Date.now()
+    const full: MemoryRow = {
+      id: row.id ?? newId(now),
+      level: row.level,
+      domain: row.domain ?? 'content',
+      title: row.title ?? null,
+      content: row.content,
+      importance: row.importance ?? 1,
+      keywords: row.keywords ?? [],
+      status: row.status ?? 'active',
+      corrected: row.corrected ?? 0,
+      project: row.project ?? null,
+      subcategory: row.subcategory ?? null,
+      goal: row.goal ?? null,
+      source_session: row.source_session ?? null,
+      hit_count: row.hit_count ?? 0,
+      created_at: row.created_at ?? now,
+      updated_at: row.updated_at ?? now,
+      last_accessed_at: row.last_accessed_at ?? null,
+    }
+    this.db
+      .prepare(
+        `INSERT INTO ${full.level} (id, domain, title, content, importance, keywords, status, source_session, hit_count, created_at, updated_at, last_accessed_at
+          ${full.level === 'project' ? ', project, subcategory' : ''}
+          ${full.level === 'fact' || full.level === 'lesson' || full.level === 'rules' ? ', project' : ''}
+          ${full.level === 'lesson' ? ', corrected' : ''}
+          ${full.level === 'topic' ? ', goal, project' : ''}
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+          ${full.level === 'project' ? ', ?, ?' : ''}
+          ${full.level === 'fact' || full.level === 'lesson' || full.level === 'rules' ? ', ?' : ''}
+          ${full.level === 'lesson' ? ', ?' : ''}
+          ${full.level === 'topic' ? ', ?, ?' : ''}
+        )`,
+      )
+      .run(
+        full.id,
+        full.domain,
+        full.title,
+        full.content,
+        full.importance,
+        JSON.stringify(full.keywords),
+        full.status,
+        full.source_session,
+        full.hit_count,
+        full.created_at,
+        full.updated_at,
+        full.last_accessed_at,
+        ...(full.level === 'project' ? [full.project ?? '', full.subcategory] : []),
+        ...(full.level === 'fact' || full.level === 'lesson' || full.level === 'rules' ? [full.project] : []),
+        ...(full.level === 'lesson' ? [full.corrected] : []),
+        ...(full.level === 'topic' ? [full.goal, full.project] : []),
+      )
+    return full
+  }
+
+  /** 跨表定位（UUID 全局唯一，扫描全部表）。id 支持 8 位前缀匹配
+   *  （快照/检索结果给的是截断 id；前缀碰撞时取第一个）。 */
+  findById(id: string): { row: MemoryRow; level: Level } | undefined {
+    const prefix = id.length < 36
+    for (const level of LEVELS) {
+      const sql = prefix ? `SELECT * FROM ${level} WHERE id LIKE ?` : `SELECT * FROM ${level} WHERE id = ?`
+      const r = this.db.prepare(sql).get(prefix ? `${id}%` : id) as Record<string, unknown> | undefined
+      if (r) return { row: this.fromRow(level, r), level }
+    }
+    return undefined
+  }
+
+  update(level: Level, id: string, patch: MemoryPatch): boolean {
+    const sets: string[] = []
+    const args: unknown[] = []
+    const push = (col: string, val: unknown) => {
+      sets.push(`${col} = ?`)
+      args.push(val)
+    }
+    if (patch.domain !== undefined) push('domain', patch.domain)
+    if (patch.content !== undefined) push('content', patch.content)
+    if (patch.title !== undefined) push('title', patch.title)
+    if (patch.importance !== undefined) push('importance', patch.importance)
+    if (patch.keywords !== undefined) push('keywords', JSON.stringify(patch.keywords))
+    if (patch.status !== undefined) push('status', patch.status)
+    if (patch.corrected !== undefined && level === 'lesson') push('corrected', patch.corrected)
+    if (patch.project !== undefined && (level === 'project' || level === 'fact' || level === 'lesson' || level === 'rules')) {
+      push('project', patch.project)
+    }
+    if (patch.subcategory !== undefined && level === 'project') push('subcategory', patch.subcategory)
+    if (patch.goal !== undefined && level === 'topic') push('goal', patch.goal)
+    if (patch.project !== undefined && level === 'topic') push('project', patch.project)
+    if (sets.length === 0) return false
+    push('updated_at', Date.now()) // 记忆时间戳 = 最后更新时间（任何 update 都刷新）
+    // 短 id = 模型截断输出（findById/update 共享的前缀匹配语义）。前缀 LIKE 可能命中
+    // 多行——歧义更新会静默改掉一批无关注记（#23 复盘顺带加固）：先解析，唯一命中
+    // 升级为全 id 精确更新（语义不变，不再走 LIKE），多行命中拒绝（warn 留痕），
+    // 零命中与旧行为一致返回 false。
+    let targetId = id
+    if (id.length < 36) {
+      const matches = this.db.prepare(`SELECT id FROM ${level} WHERE id LIKE ?`).all(`${id}%`) as Array<{ id: string }>
+      if (matches.length > 1) {
+        console.warn(`[meow-memory] update 拒绝歧义短 id：${level} 前缀 "${id}" 命中 ${matches.length} 行，请用完整 id`)
+        return false
+      }
+      if (matches.length === 0) return false
+      targetId = matches[0].id
+    }
+    const res = this.db.prepare(`UPDATE ${level} SET ${sets.join(', ')} WHERE id = ?`).run(...args, targetId)
+    return res.changes > 0
+  }
+
+  list(level: Level, opts: { status?: Status; project?: string } = {}): MemoryRow[] {
+    const where: string[] = []
+    const args: unknown[] = []
+    if (opts.status) {
+      where.push('status = ?')
+      args.push(opts.status)
+    }
+    if (opts.project !== undefined && (level === 'project' || level === 'fact' || level === 'lesson' || level === 'rules')) {
+      where.push('project = ?')
+      args.push(opts.project)
+    }
+    const sql = `SELECT * FROM ${level}${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY created_at DESC`
+    const rows = this.db.prepare(sql).all(...args) as Record<string, unknown>[]
+    return rows.map((r) => this.fromRow(level, r))
+  }
+
+  /** 全部 active 条目（dream / 注入用），按 level 分组。 */
+  allActive(): Record<Level, MemoryRow[]> {
+    const out = {} as Record<Level, MemoryRow[]>
+    for (const level of LEVELS) out[level] = this.list(level, { status: 'active' })
+    return out
+  }
+
+  /** 可检索条目：active 全部；project.subcategory='todo' 的 stale 视为 done 参与检索。
+   *  （用户拍板：todo 过时=finish 可检索，其他类别过时不检索。） */
+  listSearchable(level: Level): MemoryRow[] {
+    const active = this.list(level, { status: 'active' })
+    if (level !== 'project') return active
+    const todoDone = (
+      this.db.prepare(`SELECT * FROM project WHERE status = 'stale' AND subcategory = 'todo'`).all() as Record<string, unknown>[]
+    ).map((r) => this.fromRow('project', r))
+    return [...active, ...todoDone]
+  }
+
+  bumpHit(level: Level, id: string): void {
+    this.db.prepare(`UPDATE ${level} SET hit_count = hit_count + 1, last_accessed_at = ? WHERE id = ?`).run(
+      Date.now(),
+      id,
+    )
+  }
+
+  count(level: Level): number {
+    const row = this.db.prepare(`SELECT COUNT(*) AS n FROM ${level}`).get() as { n: number }
+    return row.n
+  }
+
+  /** 全部出现过（含已过时）的项目名：project/fact/lesson/topic/rules 五表的 project 列并集
+   *  （多值逗号分隔展开；全局标记不是项目，projectList 已排除）。供记忆导引列出"用户的所有 project"。 */
+  listProjectNames(): string[] {
+    const names = new Set<string>()
+    for (const level of ['project', 'fact', 'lesson', 'topic', 'rules'] as const) {
+      const rows = this.db.prepare(`SELECT project FROM ${level} WHERE project IS NOT NULL AND project != ''`).all() as Array<{ project: string }>
+      for (const r of rows) for (const n of projectList(r.project)) names.add(n)
+    }
+    return [...names].sort((a, b) => a.localeCompare(b))
+  }
+
+  logDream(summary: string, changes: unknown, note = ''): void {
+    this.db
+      .prepare('INSERT INTO dream_log (run_at, summary, changes, note) VALUES (?, ?, ?, ?)')
+      .run(Date.now(), summary, JSON.stringify(changes), note)
+  }
+
+  recentDream(hours: number): boolean {
+    const row = this.db
+      .prepare('SELECT run_at FROM dream_log ORDER BY run_at DESC LIMIT 1')
+      .get() as { run_at: number } | undefined
+    if (!row) return false
+    return Date.now() - row.run_at < hours * 3600_000
+  }
+
+  /**
+   * Low-risk lifecycle maintenance:
+   * - archive low-importance active rows not touched for archiveAfterDays;
+   * - keep at most maxActive active rows per content level;
+   * - checkpoint WAL; optionally VACUUM when explicitly requested.
+   * rules/soul are never auto-archived (they are identity/guiding layers).
+   */
+  maintain(options: { archiveAfterDays?: number; maxActive?: number; vacuum?: boolean } = {}): { archived: number; vacuumed: boolean } {
+    const archiveAfterDays = options.archiveAfterDays ?? 180
+    const maxActive = options.maxActive ?? 1000
+    const cutoff = Date.now() - archiveAfterDays * 86_400_000
+    let archived = 0
+    for (const level of ['project', 'fact', 'lesson', 'topic'] as Level[]) {
+      const active = this.list(level, { status: 'active' })
+      const stale = active.filter((row) => row.importance <= 2
+        && (row.last_accessed_at ?? row.updated_at) < cutoff)
+      for (const row of stale) {
+        this.db.prepare(`UPDATE ${level} SET status = 'archived' WHERE id = ?`).run(row.id)
+        archived += 1
+      }
+      const remaining = active.filter((row) => !stale.some((candidate) => candidate.id === row.id))
+      if (remaining.length > maxActive) {
+        const excess = remaining
+          .slice()
+          .sort((a, b) => (a.importance - b.importance)
+            || ((a.last_accessed_at ?? a.updated_at) - (b.last_accessed_at ?? b.updated_at)))
+          .slice(0, remaining.length - maxActive)
+        for (const row of excess) {
+          this.db.prepare(`UPDATE ${level} SET status = 'archived' WHERE id = ?`).run(row.id)
+          archived += 1
+        }
+      }
+    }
+    let vacuumed = false
+    try {
+      this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)')
+      if (options.vacuum === true) {
+        this.db.exec('VACUUM')
+        vacuumed = true
+      }
+    } catch {
+      /* maintenance must not break writes */
+    }
+    return { archived, vacuumed }
+  }
+
+  close(): void {
+    try {
+      this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)')
+    } catch {
+      /* checkpoint is best-effort */
+    }
+    try {
+      this.db.close()
+    } catch {
+      /* already closed */
+    }
+  }
+
+  /** 子 agent / dream 用的只读快照：把一组行转成纯数据（无 db 依赖）。 */
+  snapshot(level: Level, opts: { status?: Status } = {}): MemoryRow[] {
+    return this.list(level, opts)
+  }
+
+  // ── windows 窗口表（dream 判定：跨重启持久化） ───────────────────────────
+
+  touchWindow(sessionId: string, workspace: string, eventTime: number): void {
+    this.db
+      .prepare(`INSERT INTO windows (session_id, workspace, last_event_time, last_dream_time) VALUES (?, ?, ?, NULL)
+        ON CONFLICT(session_id) DO UPDATE SET workspace = excluded.workspace, last_event_time = MAX(last_event_time, excluded.last_event_time)`)
+      .run(sessionId, workspace, eventTime)
+  }
+
+  setWindowDream(sessionId: string, time: number): void {
+    this.db.prepare(`UPDATE windows SET last_dream_time = ? WHERE session_id = ?`).run(time, sessionId)
+  }
+
+  /** 原子抢占 dream 租约（跨进程/实例防重复 start）：返回 true 表示抢占成功（可 start）。
+   *  条件：无租约（owner IS NULL）或租约已过期（progress_at 超 leaseMs）。owner 只用于抢占判断 + 诊断；
+   *  推进/收尾按「sessionId + 租约未过期」判定，不校验 owner。 */
+  claimDream(sessionId: string, owner: string, T: number, leaseMs: number): boolean {
+    this.db
+      .prepare(`INSERT OR IGNORE INTO windows (session_id, workspace, last_event_time, last_dream_time) VALUES (?, NULL, 0, NULL)`)
+      .run(sessionId)
+    const now = Date.now()
+    return (
+      this.db
+        .prepare(
+          `UPDATE windows SET dream_owner = ?, dream_started_at = ?, dream_progress_at = ?, dream_group_idx = 0, dream_T = ?
+           WHERE session_id = ? AND (dream_owner IS NULL OR dream_progress_at IS NULL OR dream_progress_at <= ?)`,
+        )
+        .run(owner, now, now, T, sessionId, now - leaseMs).changes === 1
+    )
+  }
+
+  /** dream 收尾：清租约 + 记 last_dream_time（dream 完成时刻）。 */
+  finishDream(sessionId: string, time: number): void {
+    this.db
+      .prepare(`UPDATE windows SET dream_owner = NULL, dream_started_at = NULL, dream_progress_at = NULL, dream_group_idx = NULL, dream_T = NULL, last_dream_time = ? WHERE session_id = ?`)
+      .run(time, sessionId)
+    // dream 收尾（完成/中止/封存）= 本轮尝试周期结束：失败计数清零（issue #36）。
+    this.clearDreamFailure(sessionId)
+  }
+
+  /** dream 失败释放：只清租约，**不动 last_dream_time**——窗口保持「待整理」状态，
+   *  下个检查周期 windowNeedsDream 仍成立即自动重试。
+   *  与 finishDream 的语义区分：finish=完成/用户中止（封存，last_dream_time=收尾时刻）；
+   *  release=执行失败（网络/服务瞬态故障，非用户意愿，2026-09-05 教训：把失败窗口
+   *  按 aborted 封存会让一次断网整夜吞掉所有窗口的 dream 且永不重试）。 */
+  releaseDream(sessionId: string): void {
+    this.db
+      .prepare(`UPDATE windows SET dream_owner = NULL, dream_started_at = NULL, dream_progress_at = NULL, dream_group_idx = NULL, dream_T = NULL WHERE session_id = ?`)
+      .run(sessionId)
+  }
+
+  // ── dream 失败计数（issue #36）──────────────────────────────────────────────
+  // 存 dream_meta（KV，跨实例/重启共享）：`dreamfail_c:<sid>` = 连续失败次数、
+  // `dreamfail_t:<sid>` = 计数对应的整理范围 T。T 变了（窗口有新活动 → 新一轮整理
+  // 范围不同）自动从 1 重计；dream 收尾（finishDream）清零。与 releaseDream 的
+  // 「失败不封存、可重试」语义配套：失败只释放，连续达上限（DREAM_MAX_ATTEMPTS，
+  // dream.ts）才封存止损——既不让一次故障静默吞掉整窗记忆，也不让持续性故障
+  // 变成无限重试烧 token。
+
+  /** 记一次 dream 失败，返回当前连续失败次数（同 T 累加，T 变化重计）。 */
+  recordDreamFailure(sessionId: string, T: number): number {
+    const prevT = this.db.prepare(`SELECT value FROM dream_meta WHERE key = ?`).get(`dreamfail_t:${sessionId}`) as { value: number | null } | undefined
+    const prevC = this.db.prepare(`SELECT value FROM dream_meta WHERE key = ?`).get(`dreamfail_c:${sessionId}`) as { value: number | null } | undefined
+    const count = prevT !== undefined && prevT.value === T && prevC !== undefined && typeof prevC.value === 'number' && prevC.value >= 1
+      ? prevC.value + 1
+      : 1
+    this.db
+      .prepare(`INSERT INTO dream_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
+      .run(`dreamfail_t:${sessionId}`, T)
+    this.db
+      .prepare(`INSERT INTO dream_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
+      .run(`dreamfail_c:${sessionId}`, count)
+    return count
+  }
+
+  /** 清 dream 失败计数（finishDream 收尾时自动调用；一般无需手动调）。 */
+  clearDreamFailure(sessionId: string): void {
+    this.db.prepare(`DELETE FROM dream_meta WHERE key = ?`).run(`dreamfail_t:${sessionId}`)
+    this.db.prepare(`DELETE FROM dream_meta WHERE key = ?`).run(`dreamfail_c:${sessionId}`)
+  }
+
+  /** 是否有进行中/未收尾的 dream（租约存在，无论是否过期）。 */
+  isDreamPending(sessionId: string): boolean {
+    const row = this.db.prepare(`SELECT dream_owner FROM windows WHERE session_id = ?`).get(sessionId) as
+      | { dream_owner: string | null }
+      | undefined
+    return row?.dream_owner != null
+  }
+
+  /** 读窗口当前 dream 租约；无租约返回 null。 */
+  getDreamLease(sessionId: string): { owner: string; started_at: number; progress_at: number; group_idx: number; T: number } | null {
+    const row = this.db
+      .prepare(`SELECT dream_owner, dream_started_at, dream_progress_at, dream_group_idx, dream_T FROM windows WHERE session_id = ?`)
+      .get(sessionId) as
+      | { dream_owner: string | null; dream_started_at: number | null; dream_progress_at: number | null; dream_group_idx: number | null; dream_T: number | null }
+      | undefined
+    if (!row || row.dream_owner == null) return null
+    return {
+      owner: row.dream_owner,
+      started_at: row.dream_started_at ?? 0,
+      progress_at: row.dream_progress_at ?? 0,
+      group_idx: row.dream_group_idx ?? 0,
+      T: row.dream_T ?? 0,
+    }
+  }
+
+  /** CAS 推进租约：group_idx +1 并刷新心跳。多实例同收 turn-stopping 时只有一个成功。 */
+  advanceDreamLease(sessionId: string, fromIdx: number, leaseMs: number): boolean {
+    const now = Date.now()
+    return (
+      this.db
+        .prepare(
+          `UPDATE windows SET dream_group_idx = dream_group_idx + 1, dream_progress_at = ?
+           WHERE session_id = ? AND dream_group_idx = ? AND dream_owner IS NOT NULL AND dream_progress_at > ?`,
+        )
+        .run(now, sessionId, fromIdx, now - leaseMs).changes === 1
+    )
+  }
+
+  /** 轮内租约心跳：只刷新 progress_at，不动 group_idx（推进仍归 advanceDreamLease 的 CAS）。
+   *  安全性：只 touch 梦的活跃租约——finalize/release/abort 清租约后 changes=0，
+   *  调用方据此自动停表，僵尸 dream 永远不会被心跳续命。 */
+  touchDreamLease(sessionId: string): boolean {
+    return this.db
+      .prepare(`UPDATE windows SET dream_progress_at = ? WHERE session_id = ? AND dream_owner IS NOT NULL`)
+      .run(Date.now(), sessionId).changes === 1
+  }
+
+  // ── dream_skip 门控表（v0.16.0 跳过 dream → v0.30.0 升级为「记忆参与」三档门控，#38）──
+  // 一行 = 一个窗口的门控状态：skip_dream（跳过整理：自动 dream + 自动反思）、
+  // skip_inject（停止读入：首轮快照/命中/重注入/search/read 等读入口）、skip_write
+  // （停止写入：普通轮的 remember/update；整理轮写入跟随整理档）。三档全 false 删行。
+
+  /** 读某窗口的门控状态（无行 = 三档全开）。 */
+  getMemoryScope(sessionId: string): { dream: boolean; inject: boolean; write: boolean } {
+    const row = this.db
+      .prepare(`SELECT skip_dream, skip_inject, skip_write FROM dream_skip WHERE session_id = ?`)
+      .get(sessionId) as { skip_dream: number; skip_inject: number; skip_write: number } | undefined
+    if (row === undefined) return { dream: false, inject: false, write: false }
+    return { dream: row.skip_dream === 1, inject: row.skip_inject === 1, write: row.skip_write === 1 }
+  }
+
+  /** 设置某窗口某档的开关；三档全 false 时删行（表只存有门槛的窗口）。
+   *  新行显式插 0（DDL 的 DEFAULT 1 只服务于老行迁移——老行语义就是 dream 跳过）。 */
+  setMemoryScopeField(sessionId: string, field: 'dream' | 'inject' | 'write', value: boolean): void {
+    const col = field === 'dream' ? 'skip_dream' : field === 'inject' ? 'skip_inject' : 'skip_write'
+    this.db
+      .prepare(`INSERT INTO dream_skip (session_id, created_at, skip_dream, skip_inject, skip_write) VALUES (?, ?, 0, 0, 0) ON CONFLICT(session_id) DO NOTHING`)
+      .run(sessionId, Date.now())
+    this.db.prepare(`UPDATE dream_skip SET ${col} = ? WHERE session_id = ?`).run(value ? 1 : 0, sessionId)
+    const scope = this.getMemoryScope(sessionId)
+    if (!scope.dream && !scope.inject && !scope.write) {
+      this.db.prepare(`DELETE FROM dream_skip WHERE session_id = ?`).run(sessionId)
+    }
+  }
+
+  /** 全部门控状态（client 全量对账用）。 */
+  listMemoryScopes(): Array<{ session_id: string; dream: boolean; inject: boolean; write: boolean }> {
+    const rows = this.db
+      .prepare(`SELECT session_id, skip_dream, skip_inject, skip_write FROM dream_skip
+        WHERE skip_dream = 1 OR skip_inject = 1 OR skip_write = 1`)
+      .all() as Array<{ session_id: string; skip_dream: number; skip_inject: number; skip_write: number }>
+    return rows.map((r) => ({ session_id: r.session_id, dream: r.skip_dream === 1, inject: r.skip_inject === 1, write: r.skip_write === 1 }))
+  }
+
+  /** 设置/清除某会话的跳过标记（v0.30.0 起委派门控表 dream 档；旧调用点/测试兼容）。 */
+  setDreamSkip(sessionId: string, skip: boolean): void {
+    this.setMemoryScopeField(sessionId, 'dream', skip)
+  }
+
+  /** 该会话是否被跳过自动 dream（只挡定时器自动触发；手动触发不受限）。 */
+  isDreamSkipped(sessionId: string): boolean {
+    return this.getMemoryScope(sessionId).dream
+  }
+
+  /** 全部被跳过的会话 id（client 全量对账用，v0.30.0 起为 dream 档子集）。 */
+  listDreamSkips(): string[] {
+    return this.listMemoryScopes().filter((s) => s.dream).map((s) => s.session_id)
+  }
+
+  // ── 全局检查门（dream 定时器防叠加） ─────────────────────────────────────
+  // 根因：插件热重载/多实例并存时，dispose 未必清理旧 setInterval → 多个定时器
+  // 叠加 → 检查频率远高于 checkMinutes，同一窗口被反复 start。检查动作本身
+  // 必须幂等：DB 原子抢占"检查窗口"（minIntervalMs 内只有一个实例通过），
+  // 与 startWindowDream 的 claimDream（start 幂等）+ recoverInterruptedDream
+  // （中断自愈）组成三层防重复闭环。
+
+  /** 原子抢占一次检查窗口：minIntervalMs 内只有一个调用方返回 true。 */
+  claimCheckGate(minIntervalMs: number): boolean {
+    this.db.prepare(`INSERT OR IGNORE INTO dream_meta (key, value) VALUES ('last_check', 0)`).run()
+    const now = Date.now()
+    return (
+      this.db
+        .prepare(`UPDATE dream_meta SET value = ? WHERE key = 'last_check' AND value <= ?`)
+        .run(now, now - minIntervalMs).changes === 1
+    )
+  }
+
+  getWindow(sessionId: string): { session_id: string; workspace: string; last_event_time: number; last_dream_time: number | null } | undefined {
+    return this.db.prepare(`SELECT * FROM windows WHERE session_id = ?`).get(sessionId) as
+      | { session_id: string; workspace: string; last_event_time: number; last_dream_time: number | null }
+      | undefined
+  }
+
+  listWindows(): Array<{ session_id: string; workspace: string; last_event_time: number; last_dream_time: number | null }> {
+    return this.db.prepare(`SELECT * FROM windows ORDER BY last_event_time DESC`).all() as Array<{
+      session_id: string
+      workspace: string
+      last_event_time: number
+      last_dream_time: number | null
+    }>
+  }
+
+  /** 本窗口建立的全部条目 id（dream 收尾：updated_at 批量写入用）。 */
+  idsBySession(sessionId: string): Array<{ level: Level; id: string }> {
+    const out: Array<{ level: Level; id: string }> = []
+    for (const level of LEVELS) {
+      const rows = this.db.prepare(`SELECT id FROM ${level} WHERE source_session = ?`).all(sessionId) as Array<{ id: string }>
+      for (const r of rows) out.push({ level, id: r.id })
+    }
+    return out
+  }
+
+  /** 批量写记忆时间戳（dream 收尾：本窗口条目 updated_at = 窗口最后对话时间 T；
+   *   MAX 防止覆盖 T 之后的 memory_update 刷新）。 */
+  stampDream(sessionId: string, time: number): number {
+    let n = 0
+    for (const { level, id } of this.idsBySession(sessionId)) {
+      n += this.db.prepare(`UPDATE ${level} SET updated_at = MAX(updated_at, ?) WHERE id = ?`).run(time, id).changes
+    }
+    return n
+  }
+
+  insertQuarantine(input: {
+    level: Level
+    domain?: Domain
+    content: string
+    title?: string | null
+    importance?: number
+    keywords?: string[]
+    status?: Status
+    corrected?: number
+    project?: string | null
+    subcategory?: ProjectSubcategory | null
+    goal?: string | null
+    source_session?: string | null
+    theme?: string | null
+    theme_match?: number | null
+    reason?: string | null
+    origin?: 'judge' | 'manual'
+    operation?: 'create' | 'update' | null
+    target_id?: string | null
+    patch?: string | null
+  }): QuarantineRow {
+    const now = Date.now()
+    const id = newId(now)
+    const row: QuarantineRow = {
+      id,
+      level: input.level,
+      domain: input.domain ?? 'content',
+      title: input.title ?? null,
+      content: input.content,
+      importance: input.importance ?? 1,
+      keywords: input.keywords ?? [],
+      status: input.status ?? 'active',
+      corrected: input.corrected ?? 0,
+      project: input.project ?? null,
+      subcategory: input.subcategory ?? null,
+      goal: input.goal ?? null,
+      source_session: input.source_session ?? null,
+      hit_count: 0,
+      created_at: now,
+      updated_at: now,
+      last_accessed_at: null,
+      theme: input.theme ?? null,
+      theme_match: input.theme_match ?? null,
+      reason: input.reason ?? null,
+      origin: input.origin ?? 'judge',
+      operation: input.operation ?? null,
+      target_id: input.target_id ?? null,
+      patch: input.patch ?? null,
+    }
+    this.db.prepare(`INSERT INTO quarantine (
+      id, level, domain, title, content, importance, keywords, status, corrected, project, subcategory, goal,
+      source_session, hit_count, created_at, updated_at, last_accessed_at, theme, theme_match, reason,
+      origin, operation, target_id, patch
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      row.id, row.level, row.domain, row.title, row.content, row.importance, JSON.stringify(row.keywords), row.status,
+      row.corrected, row.project, row.subcategory, row.goal, row.source_session, row.hit_count,
+      row.created_at, row.updated_at, row.last_accessed_at, row.theme, row.theme_match, row.reason,
+      row.origin, row.operation, row.target_id, row.patch,
+    )
+    return row
+  }
+
+  listQuarantine(): QuarantineRow[] {
+    return (this.db.prepare('SELECT * FROM quarantine ORDER BY created_at DESC').all() as Array<Record<string, unknown>>)
+      .map((r) => ({
+        id: String(r.id),
+        level: String(r.level) as Level,
+        domain: (r.domain === 'tooling' ? 'tooling' : 'content') as Domain,
+        title: r.title == null ? null : String(r.title),
+        content: String(r.content),
+        importance: Number(r.importance ?? 1),
+        keywords: (() => { try { return JSON.parse(String(r.keywords ?? '[]')) as string[] } catch { return [] } })(),
+        status: String(r.status) as Status,
+        corrected: Number(r.corrected ?? 0),
+        project: r.project == null ? null : String(r.project),
+        subcategory: r.subcategory == null ? null : (String(r.subcategory) as ProjectSubcategory),
+        goal: r.goal == null ? null : String(r.goal),
+        source_session: r.source_session == null ? null : String(r.source_session),
+        hit_count: Number(r.hit_count ?? 0),
+        created_at: Number(r.created_at),
+        updated_at: Number(r.updated_at),
+        last_accessed_at: r.last_accessed_at == null ? null : Number(r.last_accessed_at),
+        theme: r.theme == null ? null : String(r.theme),
+        theme_match: r.theme_match == null ? null : Number(r.theme_match),
+        reason: r.reason == null ? null : String(r.reason),
+        origin: r.origin === 'manual' ? 'manual' : 'judge',
+        operation: r.operation === 'create' || r.operation === 'update' ? r.operation : null,
+        target_id: r.target_id == null ? null : String(r.target_id),
+        patch: r.patch == null ? null : String(r.patch),
+      }))
+  }
+
+  deleteQuarantine(id: string): boolean {
+    return this.db.prepare('DELETE FROM quarantine WHERE id = ?').run(id).changes === 1
+  }
+
+  /** User-approved promotion back into the main memory table. */
+  promoteQuarantine(id: string): MemoryRow | null {
+    const row = this.listQuarantine().find((item) => item.id === id)
+    if (!row) return null
+    if (row.origin === 'manual' && row.operation === 'update' && row.target_id !== null) {
+      let patch: MemoryPatch
+      try {
+        patch = JSON.parse(row.patch ?? '{}') as MemoryPatch
+      } catch {
+        return null
+      }
+      if (!this.update(row.level, row.target_id, patch)) return null
+      this.deleteQuarantine(id)
+      return this.findById(row.target_id)?.row ?? null
+    }
+    const promoted = this.insert({
+      level: row.level,
+      domain: row.domain,
+      title: row.title,
+      content: row.content,
+      importance: row.importance,
+      keywords: row.keywords,
+      status: row.status,
+      corrected: row.corrected,
+      project: row.project,
+      subcategory: row.subcategory,
+      goal: row.goal,
+      source_session: row.source_session,
+    })
+    this.deleteQuarantine(id)
+    return promoted
+  }
+
+  setThemeMatch(level: Level, id: string, match: number | null): boolean {
+    return this.db.prepare(`UPDATE ${level} SET theme_match = ? WHERE id = ?`).run(match, id).changes === 1
+  }
+
+  deleteMemory(level: Level, id: string): boolean {
+    return this.db.prepare(`DELETE FROM ${level} WHERE id = ?`).run(id).changes === 1
+  }
+
+  getSoul(): MemoryRow | undefined {
+    return this.list('soul', { status: 'active' })[0]
+  }
+
+  /** User-edited workspace SOUL: one row, replace/update in place. */
+  setSoul(content: string): MemoryRow {
+    const existing = this.getSoul()
+    if (existing !== undefined) {
+      this.update('soul', existing.id, { content, status: 'active' })
+      return this.findById(existing.id)?.row ?? existing
+    }
+    return this.insert({ level: 'soul', content, project: null })
+  }
+
+  createThemeProposal(input: { theme: string; reason?: string | null; source_session?: string | null }): ThemeProposal {
+    const now = Date.now()
+    const proposal: ThemeProposal = {
+      id: newId(now),
+      theme: input.theme,
+      reason: input.reason ?? null,
+      source_session: input.source_session ?? null,
+      status: 'pending',
+      created_at: now,
+      decided_at: null,
+    }
+    this.db.prepare(`INSERT INTO theme_proposals (id, theme, reason, source_session, status, created_at, decided_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
+      proposal.id, proposal.theme, proposal.reason, proposal.source_session, proposal.status, proposal.created_at, proposal.decided_at,
+    )
+    return proposal
+  }
+
+  getPendingThemeProposal(): ThemeProposal | undefined {
+    const r = this.db.prepare("SELECT * FROM theme_proposals WHERE status = 'pending' ORDER BY created_at DESC LIMIT 1").get() as
+      | Record<string, unknown>
+      | undefined
+    if (!r) return undefined
+    return {
+      id: String(r.id),
+      theme: String(r.theme),
+      reason: r.reason == null ? null : String(r.reason),
+      source_session: r.source_session == null ? null : String(r.source_session),
+      status: String(r.status),
+      created_at: Number(r.created_at),
+      decided_at: r.decided_at == null ? null : Number(r.decided_at),
+    }
+  }
+
+  decideThemeProposal(id: string, status: 'confirmed' | 'rejected' | 'later'): boolean {
+    return this.db.prepare('UPDATE theme_proposals SET status = ?, decided_at = ? WHERE id = ? AND status = ?')
+      .run(status, Date.now(), id, 'pending').changes === 1
+  }
+
+  /** Settle every pending proposal after a prompt-driven theme decision. */
+  decideAllPendingThemeProposals(status: 'confirmed' | 'rejected'): number {
+    return this.db.prepare('UPDATE theme_proposals SET status = ?, decided_at = ? WHERE status = ?')
+      .run(status, Date.now(), 'pending').changes
+  }
+
+  reopenThemeProposal(id: string): boolean {
+    return this.db.prepare("UPDATE theme_proposals SET status = 'pending', decided_at = NULL WHERE id = ? AND status = 'later'")
+      .run(id).changes === 1
+  }
+
+  getWorkspaceSetting(key: string): string | null {
+    const r = this.db.prepare('SELECT value FROM workspace_settings WHERE key = ?').get(key) as { value?: string } | undefined
+    return r?.value ?? null
+  }
+
+  setWorkspaceSetting(key: string, value: string): void {
+    this.db.prepare(`INSERT INTO workspace_settings (key, value, updated_at) VALUES (?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`).run(key, value, Date.now())
+  }
+
+  private fromRow(level: Level, r: Record<string, unknown>): MemoryRow {
+    let keywords: string[] = []
+    try {
+      keywords = JSON.parse(String(r.keywords ?? '[]'))
+    } catch {
+      keywords = []
+    }
+    return {
+      id: String(r.id),
+      level,
+      domain: (r.domain === 'tooling' ? 'tooling' : 'content') as Domain,
+      title: r.title == null ? null : String(r.title),
+      content: String(r.content),
+      importance: Number(r.importance ?? 1),
+      keywords,
+      status: String(r.status) as Status,
+      corrected: Number(r.corrected ?? 0),
+      project: r.project == null ? null : String(r.project),
+      subcategory: r.subcategory == null ? null : (String(r.subcategory) as ProjectSubcategory),
+      goal: r.goal == null ? null : String(r.goal),
+      source_session: r.source_session == null ? null : String(r.source_session),
+      hit_count: Number(r.hit_count ?? 0),
+      created_at: Number(r.created_at),
+      updated_at: Number(r.updated_at),
+      last_accessed_at: r.last_accessed_at == null ? null : Number(r.last_accessed_at),
+      theme_match: r.theme_match == null ? null : Number(r.theme_match),
+    }
+  }
+}
+
+// ── 按工作区缓存（插件无全局 cwd；DB 按会话 cwd 懒打开） ─────────────────────
+
+const dbCache = new Map<string, MemoryDb>()
+
+/** 取工作区 DB（缓存复用）。workspace = 项目根（cwd）。 */
+export function getDb(workspace: string, dir = '.dsh-scope'): MemoryDb {
+  const key = `${workspace}\u0000${dir}`
+  let db = dbCache.get(key)
+  if (!db) {
+    db = new MemoryDb(memoryDbPath(workspace, dir))
+    dbCache.set(key, db)
+  }
+  return db
+}
+
+/** Close and evict one workspace's cached DB (used before deleting its files). */
+export function closeDb(workspace: string, dir = '.dsh-scope'): void {
+  const key = `${workspace}\u0000${dir}`
+  const db = dbCache.get(key)
+  if (db !== undefined) {
+    db.close()
+    dbCache.delete(key)
+  }
+}
+
+export function closeAllDbs(): void {
+  for (const db of dbCache.values()) db.close()
+  dbCache.clear()
+}
+
+/** 记忆库备份（issue #37 增量②）：memory.db → memory.db.bak，并保留最近 4 份 `.bak.N`。
+ *  mtime 判增量（bak 不旧于数据即跳过）——WAL 模式下写入落在 -wal 文件、主库
+ *  mtime 可能不动，所以取 db 与 -wal 的较新者。VACUUM INTO 不能覆盖已存在文件 →
+ *  先写 .tmp 再 rename 原子替换。失败返回 false（备份是兜底措施，绝不影响主流程）。 */
+export function backupMemoryDb(workspace: string, dir = '.dsh-scope'): boolean {
+  try {
+    const dbPath = memoryDbPath(workspace, dir)
+    if (!existsSync(dbPath)) return false
+    const bakPath = `${dbPath}.bak`
+    let dataMtime = statSync(dbPath).mtimeMs
+    const walPath = `${dbPath}-wal`
+    if (existsSync(walPath)) dataMtime = Math.max(dataMtime, statSync(walPath).mtimeMs)
+    if (existsSync(bakPath) && statSync(bakPath).mtimeMs >= dataMtime) return false
+    const tmp = `${bakPath}.tmp`
+    getDb(workspace, dir).vacuumInto(tmp)
+    // Rotation: current .bak becomes .bak.1, older copies shift right.
+    // Rotation: current .bak becomes .bak.1; keep current + .bak.1…4 (5 total).
+    rmSync(`${bakPath}.5`, { force: true })
+    rmSync(`${bakPath}.4`, { force: true })
+    for (let index = 3; index >= 1; index -= 1) {
+      const from = `${bakPath}.${index}`
+      if (!existsSync(from)) continue
+      renameSync(from, `${bakPath}.${index + 1}`)
+    }
+    if (existsSync(bakPath)) renameSync(bakPath, `${bakPath}.1`)
+    renameSync(tmp, bakPath)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** dream 子 agent 的 DB 定位通道：子 agent 会话可能无 cwd，dream 运行时临时挂载。 */
+let dreamWorkspace: string | null = null
+export function setDreamWorkspace(ws: string | null): void {
+  dreamWorkspace = ws
+}
+export function getDreamWorkspace(): string | null {
+  return dreamWorkspace
+}

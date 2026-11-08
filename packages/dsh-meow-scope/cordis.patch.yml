@@ -1,0 +1,4 @@
+# dsh-meow-scope bundle patch (development row id).
+- insert:
+    - id: dsh-meow-scope
+      name: 'dsh-meow-scope'

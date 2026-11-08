@@ -1,0 +1,5 @@
+# workspace-scope bundle patch: inserts the P0 Host probe into the profile.
+# The row id is stable so later versions can override it from the profile patch.
+- insert:
+    - id: workspace-scope
+      name: '@local/dsh-workspace-scope'

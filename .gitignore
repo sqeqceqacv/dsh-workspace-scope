@@ -1,0 +1,16 @@
+node_modules/
+research/
+*.bak
+*.log
+.DS_Store
+Thumbs.db
+.env
+.env.*
+*.db
+*.db-wal
+*.db-shm
+_tmp*
+.tmp/
+.dsh-scope/
+*.jsonl
+*.map

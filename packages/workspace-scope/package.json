@@ -1,0 +1,48 @@
+{
+  "name": "@local/dsh-workspace-scope",
+  "version": "0.4.0",
+  "private": true,
+  "description": "工作区扩展：DSH 工作区级工具、规则、SOUL 与记忆策略设置",
+  "type": "module",
+  "main": "lib/index.js",
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "test:global-rules": "node test/global-rules-smoke.mjs"
+  },
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/**/*.js",
+    "lib/memory/prompts/**/*",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "package.json"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/dsh-system-prompt": "*",
+    "@deepseek-ai/dsh-tools": "*"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    }
+  },
+  "license": "MIT"
+}

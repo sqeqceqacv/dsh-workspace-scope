@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Workspace Scope",
+    "description": "Per-workspace tools, prompt sections, rules and memory theme. Workspaces without a policy file stay fully open."
+  }
+}
