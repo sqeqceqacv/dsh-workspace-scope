@@ -223,11 +223,11 @@ check('team runtime-context sections are stripped', () => {
         kind: 'runtime-context',
         form: 'snapshot',
         sections: [
-          { name: 'working-directory:current', text: 'Working: F:\\onlyChat_dsh' },
+          { name: 'working-directory:current', text: 'Working: C:\\work\\demo' },
           { name: 'team:identity', text: 'You are the Team Lead named "lead".' },
         ],
       },
-      content: [{ type: 'text', text: 'Current runtime context.\n\nWorking: F:\\onlyChat_dsh\n\nYou are the Team Lead named "lead".' }],
+      content: [{ type: 'text', text: 'Current runtime context.\n\nWorking: C:\\work\\demo\n\nYou are the Team Lead named "lead".' }],
     }],
   }
   const stripped = stripTeamRuntimeContext(decision)
