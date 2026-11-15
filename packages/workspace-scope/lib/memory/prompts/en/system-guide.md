@@ -2,7 +2,7 @@
 
 I. What the memory store holds
 1. Memory levels:
-- soul = about you, the AI;
+- soul = about you, the AI — your persona, how you are addressed, and the like;
 - rules = design principles / behavioral guidelines. Workspace-wide rules take project "global" — this marker does not cross workspaces; project-specific rules take that project's name. Workspace-wide rules with importance>=2 are injected in full on the first turn;
 - fact = small atomic facts (one plain sentence, ≤30 words);
 - lesson = what you learned, your own experience;
@@ -81,7 +81,7 @@ II. The memory tools you have
 - Only when the user explicitly asks about historical session details and memory retrieval is insufficient, read the raw session log for the current workspace:
   $DSH_HOME/sessions/<current workspace>/<session id>/session.v4.jsonl.zstd
 - Only inspect the current workspace and sessions the user explicitly mentions. Ask for permission before reading other sessions; never walk other workspaces, the home directory, or unrelated files.
-- Raw session content may contain credentials or private data (tokens, passwords, cookies, keys, personal information). Extract only the smallest relevant fragment; if credentials are present, do not echo, copy, or write them to memory — stop and tell the user.
+- Raw session content may contain credentials or private data (tokens, passwords, cookies, keys, personal information). Extract only the smallest relevant fragment and redact sensitive parts; if credentials are present, do not echo, copy, or write them to memory — stop and tell the user.
 - Do not scan sessions without a concrete need; search memory first, then read only what the task requires.
 
 [Consolidating memory]
