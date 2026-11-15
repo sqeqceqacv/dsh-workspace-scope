@@ -3,6 +3,9 @@
 ## 当前有效
 
 - [`ui-api.md`](ui-api.md) — Workspace Scope UI / Host HTTP API v1。
+- [`development.md`](development.md) — 仓库结构、构建链、内嵌记忆同步、测试。
+- [`images/`](images/) — README 配图（截图 + 架构图）。
+- [`diagrams/`](diagrams/) — 图源（`.excalidraw`，可直接编辑后重新导出）。
 
 ## 历史记录
 
