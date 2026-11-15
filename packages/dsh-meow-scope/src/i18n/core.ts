@@ -1,7 +1,7 @@
 /**
  * meow-memory — i18n 核心（client 端 UI/UX 文案，v0.27.0）。
  *
- * 设计（用户拍板 2026-09-16：UI 跟随 DSH 语言设置）：
+ * 设计（UI 跟随 DSH 语言设置）：
  * - **跟随 DSH**：DSH 0.1.5+ 的 locale 服务（@deepseek-ai/dsh-client-locale）是
  *   UI 语言的唯一真源——用户在「设置 → 通用 → 语言」里选的 zh / en
  *   立即切换本插件的界面文案。我们注册自己的语言与字典：
@@ -87,10 +87,10 @@ const registeredLocales = new Set<string>()
 const registeredDicts = new Set<string>()
 const listeners = new Set<(locale: UiLocale) => void>()
 
-// ── locale 服务晚到重试（issue #32/#33）──────────────────────────────────────
+// ── locale 服务晚到重试──────────────────────────────────────
 // 冷启动时序：client apply 可能跑在宿主 locale 服务之前——installI18n 首次探测拿不到
 // 服务，走一次性回退（browserLocale 定格）且原实现永不纠正 → 冷启动后 UI 整会话卡
-// 英文（#32 桌面端实测，#33 重复报告）。
+// 英文（桌面端实测，曾有重复报告）。
 // 修复区分两种「没服务」（红线不动：locale 绝不进 inject——写进去会让插件在无 locale
 // 的老宿主/受限动态包上整体挂起，v0.28.0 设计决策）：
 //  - ctx 本身没有 get 能力（老宿主/受限动态包）→ 永久回退，不重试；
@@ -211,7 +211,7 @@ export function installI18n(ctx: LocaleHostContext, warn: (message: string) => v
     service = null
     active = browserLocale() ?? DEFAULT_LOCALE
     notify()
-    // issue #32：两种「没服务」分流——ctx 有 get 能力（服务只是晚到，冷启动竞态）
+    // 两种「没服务」分流——ctx 有 get 能力（服务只是晚到，冷启动竞态）
     // → 有界轮询重入；ctx 连 get 都没有（v0.28.0 决策的永久回退场景）→ 不重试。
     if (typeof ctx?.get === 'function') armLocaleRetry(ctx, warn)
     else stopLocaleRetry()

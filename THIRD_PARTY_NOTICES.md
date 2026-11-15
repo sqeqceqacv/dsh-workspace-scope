@@ -1,28 +1,47 @@
 Third-Party Notices
 ====================
 
-This repository bundles or embeds the following third-party packages in its
-build artifacts. They are distributed under the MIT License. The MIT license
-text is reproduced once below and applies to each package's copyright notice.
+`packages/dsh-meow-scope/lib/index.js` 与
+`packages/workspace-scope/lib/memory/index.js` 是用 esbuild `bundle: true`
+打包出来的产物，其中逐字内嵌了下列包。
 
-- @deepseek-ai/dsh-llm
-  Copyright (c) 2026 DeepSeek
-  https://github.com/deepseek-ai
+每个包都是 MIT 许可，版权与许可原文随产物发布在
+`packages/dsh-meow-scope/THIRD_PARTY_LICENSES/`（由 `build.mjs` 从
+`node_modules` 逐个复制，构建时校验存在性）。
 
-- @deepseek-ai/schemastery
-  Copyright (c) 2021-present Shigma
-  https://github.com/shigma/schemastery
+> 说明：本项目没有采用 `legalComments` 内联版权注释的做法，因为上述包的
+> `lib/*.js` 中不存在 `/*! */`、`@license`、`@preserve` 形式的注释，
+> esbuild 无从搬运；改为随包附带许可文件。
 
-- @deepseek-ai/cosmokit
-  Copyright (c) 2021-present Shigma
-  https://github.com/shigma/cosmokit
+Bundled packages
+----------------
 
-- @deepseek-ai/dsh-timeout
-  Copyright (c) 2026 DeepSeek
-  https://github.com/deepseek-ai
+### @deepseek-ai/dsh-llm 0.1.1-rc.2
+- Copyright (c) 2026 DeepSeek
+- Distributed source: https://github.com/deepseek-ai/deepseek-harness
+- License: MIT — see `THIRD_PARTY_LICENSES/dsh-llm.LICENSE.txt`
 
-MIT License
------------
+### @deepseek-ai/dsh-timeout 0.1.1-rc.2
+- Copyright (c) 2026 DeepSeek
+- Distributed source: https://github.com/deepseek-ai/deepseek-harness
+- License: MIT — see `THIRD_PARTY_LICENSES/dsh-timeout.LICENSE.txt`
+
+### @deepseek-ai/schemastery 3.18.1
+- Copyright (c) 2021-present Shigma
+- Distributed source: https://github.com/deepseek-ai/deepseek-harness
+- Upstream author: https://github.com/shigma/schemastery
+- License: MIT — see `THIRD_PARTY_LICENSES/schemastery.LICENSE.txt`
+
+### @deepseek-ai/cosmokit 1.8.6
+- Copyright (c) 2021-present Shigma
+- Distributed source: https://github.com/deepseek-ai/deepseek-harness
+- Upstream author: https://github.com/shigma/cosmokit
+- License: MIT — see `THIRD_PARTY_LICENSES/cosmokit.LICENSE.txt`
+
+> 版权行按各包 LICENSE 原文逐字保留，未作改写（MIT 要求原样复现权利人声明）。
+
+MIT License (applies to each package above)
+-------------------------------------------
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

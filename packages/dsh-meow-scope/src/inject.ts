@@ -1,7 +1,7 @@
 /**
  * meow-memory v2 — 会话开头注入。
  *
- * 结构（用户拍板）：soul/user 全量 + 记忆导引（project/topic 标题列表，
+ * 结构：soul 与工作区通用 rules 全量 + 记忆导引（project/topic 标题列表，
  * 正文模型自取）+ 之后每隔 N 个真实用户轮命中 fact/lesson 短条目自动注入（默认 N=2）。
  * 无每轮注入——模型自己用 memory_search 深挖。
  *
@@ -37,15 +37,15 @@ export interface SessionSeen {
   injected: string[]
   searched: string[]
   accessed: string[]
-  /** 本会话写工具落库过的记忆 id（v0.23.0）：memory_remember（新建/合并）与
+  /** 本会话写工具落库过的记忆 id：memory_remember（新建/合并）与
    *  memory_update（实际写入）成功后记录，子代理代写归父窗口文件（source_session 同源）。
    *  压缩重注入第三块数据源；releaseSeen 不清（同 projectsQueried，正是重注入数据源）。 */
   written: string[]
   /** 本会话 AI 调 memory_project 查阅过的项目名（v0.21.0，按查询顺序、去重、
    *  最多保留 MAX_REINJECT_PROJECTS 个最近项）：会话压缩后重注入项目全景的清单。
-   *  '全局' 不记（全局 soul/user/rules 已在快照层，非项目）；多项目参数按逗号拆开记。 */
+   *  '全局' 不记（全局 soul/rules 已在快照层，非项目）；多项目参数按逗号拆开记。 */
   projectsQueried: string[]
-  /** 压缩成功落地后置 true（v0.21.0）：下一个含真实用户消息的 pre-step 注入
+  /** 压缩成功落地后置 true：下一个含真实用户消息的 pre-step 注入
    *  压缩重注入块（长期记忆快照 + 项目全景），随后清回 false。 */
   reinjectPending: boolean
   /** 当前 project 锚定（最近一次带 project 参数的 memory 工具调用）：命中检索限定"全局+当前项目"。 */
@@ -122,7 +122,7 @@ export function markSearched(workspace: string, sessionId: string, ids: string[]
   writeSeenFile(workspace, sessionId, seen, dir)
 }
 
-/** 追加 memory_read 读过的 id（v0.17.0）：dream 第一轮"查阅过"源。
+/** 追加 memory_read 读过的 id：dream 第一轮"查阅过"源。
  *  只由 memory_read 单条读取触发；memory_project 全景不标记（第三轮项目总结专门复查）。 */
 export function markAccessed(workspace: string, sessionId: string, ids: string[], dir = '.dsh-scope'): void {
   if (ids.length === 0) return
@@ -133,7 +133,7 @@ export function markAccessed(workspace: string, sessionId: string, ids: string[]
   writeSeenFile(workspace, sessionId, seen, dir)
 }
 
-/** 追加本会话写工具落库过的 id（v0.23.0）：memory_remember（新建/合并）与
+/** 追加本会话写工具落库过的 id：memory_remember（新建/合并）与
  *  memory_update（实际写入）成功后调用。重复写入移到末尾（最近优先），
  *  超过 MAX_REINJECT_WRITTEN 淘汰最旧的。 */
 export function markWritten(workspace: string, sessionId: string, ids: string[], dir = '.dsh-scope'): void {
@@ -150,7 +150,7 @@ export function readWritten(workspace: string, sessionId: string, dir = '.dsh-sc
   return readSeenFile(workspace, sessionId, dir).written
 }
 
-/** 记录 memory_project 查阅过的项目（v0.21.0）：压缩重注入清单。
+/** 记录 memory_project 查阅过的项目：压缩重注入清单。
  *  全局标记（isGlobalProject，语言感知）/空串跳过；多项目参数按逗号拆开逐个记；
  *  重复查询移到末尾（最近优先）；超过 MAX_REINJECT_PROJECTS 淘汰最旧的。 */
 export function markProjectQueried(workspace: string, sessionId: string, project: string, dir = '.dsh-scope'): void {
@@ -192,7 +192,7 @@ export function isReinjectPending(workspace: string, sessionId: string, dir = '.
 
 /** 释放本会话已见记录（收到会话压缩信号后调用）：清空 injected/searched，
  *  允许之前注入/检索过的记忆被再次命中提取——压缩后它们的内容已不在上下文里。
- *  accessed 不清（用户拍板 2026-08-25）：它只服务 dream 扫尾范围、没有去重功能，
+ *  accessed 不清：它只服务 dream 扫尾范围、没有去重功能，
  *  清掉纯丢信息——长窗口压缩前读过的条目恰恰最该被 dream 复查。
  *  当前 project 锚定保留（与可见性无关）；projectsQueried/written/reinjectPending 保留
  *  （它们正是压缩重注入的数据源，见 buildReinjection）。 */
@@ -257,7 +257,7 @@ function buildInjectionBody(
   db: MemoryDb,
   o: InjectOptions,
 ): { body: string; injectedIds: string[] } | null {
-  // 框架词外置（v0.19.0）：labels.md 的 inject.* 键；记忆条目正文本身是数据不是文案，不外置。
+  // 框架词外置：labels.md 的 inject.* 键；记忆条目正文本身是数据不是文案，不外置。
   const lbl = (key: string, params?: Record<string, string>): string => fillTemplate(keyedValue('labels', key), params)
   const soul = db.list('soul', { status: 'active' })
 
@@ -278,15 +278,15 @@ function buildInjectionBody(
 
   // 工作区设计原则（rules）：注入「本工作区内跨项目通用（未标记 null / 空串 / 标记「全局」「global」）
   // 且 importance≥2」的——少而精的命令式准则。
-  // 2026-09-19 口径修复（用户拍板）：此前只认 project === null，而文档（tools.md /
+  // 2026-09-19 口径修复：此前只认 project === null，而文档（tools.md /
   // system-guide.md / dream-atomic.md）教模型写"全局"——按文档写的准则反而永不注入。
   const globalRules = db.list('rules', { status: 'active' }).filter((r) => isGlobalScope(r.project) && r.importance >= 2)
   pushEntries(lbl('inject.rules'), globalRules)
 
   // 记忆导引：说明 + 项目列表（正文/标题一律自取，不列）。
-  // titleMax 落地（2026-09-10）：schema/设置页一直承诺「导引里项目名的截断长度」，
+  // titleMax 落地：schema/设置页一直承诺「导引里项目名的截断长度」，
   // 此前是死配置（shortTitle 被 void）。这里按承诺截断项目名——只影响导引一行展示，
-  // 记忆条目正文/标题依旧不截断（v0.19.0 拍板不变）。
+  // 记忆条目正文/标题依旧不截断。
   const projectNames = db.listProjectNames()
   if (projectNames.length > 0) {
     const max = o.titleMax
@@ -303,7 +303,7 @@ function buildInjectionBody(
 }
 
 /**
- * 构造首轮长期记忆注入块（用户拍板格式，PR #10 起为独立 plugin snapshot 正文）：
+ * 构造首轮长期记忆注入块（独立 plugin snapshot 正文）：
  *   顶格「===== 长期记忆 =====」→ 【关于你】(soul) / 【关于user】/ 【设计原则】/ 【记忆导引】(两行)。
  *   不再拼接结束标记与「本轮用户prompt：」尾巴——正文作为独立消息插在真实用户消息前，
  *   用户 prompt 保持原样（防会话标题污染；旧格式历史会话由前端折叠兼容）。
@@ -327,7 +327,7 @@ export function buildInjection(
   return { text: asMemoryData(text), injectedIds: built.injectedIds }
 }
 
-/** 框架词（labels.md）：项目全景段落里的短词随语言包走（PR #6 外置，zh 值逐字不变）。 */
+/** 框架词（labels.md）：项目全景段落里的短词随语言包走（外置，zh 值逐字不变）。 */
 const lbl = (key: string, params?: Record<string, string>): string => fillTemplate(keyedValue('labels', key), params)
 /** 子标签 → 注入段落标题（文案外置：labels.md 的 project.section.*）。 */
 const sectionTitle = (sub: ProjectSubcategory): string => lbl(`project.section.${sub}`)
@@ -430,7 +430,7 @@ export function buildProjectSectionText(db: MemoryDb, workspace: string, project
 }
 
 /**
- * 压缩重注入第三块（v0.23.0）：本会话写过的记忆原文回放。
+ * 压缩重注入第三块：本会话写过的记忆原文回放。
  * 数据源 = sessions/<id>.json 的 written（memory_remember/memory_update 落库痕迹，
  * 子代理代写归父窗口）∪ db 层 source_session=本会话 的新建条目（双保险，覆盖插件
  * 热更新前旧代码写入的条目）。按当前库最新数据解析原文（不缓存旧文本）；只回放
@@ -474,7 +474,7 @@ function buildWrittenSection(
  * ② 【会话已压缩】说明 + 本会话此前查阅过的项目全景（按当前库最新数据重新构造，
  *    空项目跳过；项目全景条目按现行原则不标记已见）；
  * ③ 【本会话写过的记忆】+ 本会话写工具落库过的条目原文（见 buildWrittenSection）。
- * 不拼尾注（PR #10 起）：正文作为独立 plugin snapshot 消息插在真实用户消息前，
+ * 不拼尾注：正文作为独立 plugin snapshot 消息插在真实用户消息前，
  * 用户 prompt 保持原样。
  * 快照条目 id 与回放的 written id 重新记入 injected——压缩后内容重新进入上下文，
  * 去重语义随之恢复（合并更新过的他窗条目不再被关键词命中重复注入）。

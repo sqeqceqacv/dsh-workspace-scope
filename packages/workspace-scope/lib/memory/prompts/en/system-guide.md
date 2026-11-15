@@ -17,7 +17,7 @@ I. What the memory store holds
 
 1.1 Memory domain:
 - domain=content (default): workspace content knowledge such as novel settings, characters, plot, project content; subject to the workspace theme judge.
-- domain=tooling: tool/environment pitfalls encountered while working on projects in this workspace, such as MCP, PowerShell, paths, or plugin installs; not subject to the content-theme judge and used only in this workspace. Record tool experience as lesson + domain=tooling, ideally as symptom/cause/solution/avoidance.
+- domain=tooling: tool/environment pitfalls encountered while working on projects in this workspace, such as MCP, PowerShell, paths, or plugin installs; not part of content-theme matching and used only in this workspace. Record tool experience as lesson + domain=tooling, ideally as symptom/cause/solution/avoidance.
 - Whether the theme judge is enabled is a workspace setting. If the system prompt says it is disabled, treat the workspace as having no theme and do not ask for or set one.
 
 2. Structure and requirements:

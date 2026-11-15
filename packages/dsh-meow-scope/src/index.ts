@@ -1,18 +1,18 @@
 /**
- * meow-memory v2 — 喵版跨会话记忆插件（host 端）。
+ * meow-memory v2 — 跨会话记忆插件（host 端）。
  *
- * 设计（2026-08-15 与用户拍板）：
+ * 设计：
  * - SQLite 结构化存储（node:sqlite，宿主同款），每 level 一表：
- *   soul / user / project / fact / lesson / topic / rules；id=时间前缀（排序=创建顺序）。
- * - 注入：会话开头 soul/user 全量 + 记忆导引（project/topic 标题列表，正文自取）
+ *   soul / project / fact / lesson / topic / rules；id=时间前缀（排序=创建顺序）。
+ * - 注入：会话开头 soul 与工作区通用 rules 全量 + 记忆导引（project/topic 标题列表，正文自取）
  *   + 第一条用户消息关键词命中 fact/lesson 短条目；无每轮注入。
  * - 去重：.dsh-scope/sessions/<sessionId>.json 记录本会话注入过的 memory id。
  * - 工具：memory_remember / memory_search / memory_read / memory_update
  *   + memory_dream（手动整理本窗口）。
  * - 反思：干过活的 turn 结束后引导模型记忆——【一】新记忆（project 列表/纠正/偏好）、
  *   【二】更新判断（含关键词不准反推）、【三】通用要求（subcategory/关键词 8-13/importance）；
- *   topic 归 dream 轮处理（用户拍板 2026-08-19）。
- * - dream：按窗口空闲整理（用户拍板 2026-08-19：空闲 ≥3h 即允许，替代原夜间窗口；
+ *   topic 归 dream 轮处理。
+ * - dream：按窗口空闲整理（空闲 ≥3h 即允许；
  *   北京时间峰时 09:00–12:00 / 14:00–18:00 及前 15 分钟抑制不触发）——每个窗口由
  *   自己的主 agent 整理自己建立/提取过的记忆，分轮处理（原子记忆 project/fact/lesson
  *   → topic 记忆 → 项目总结，2026-08-22 加第三轮），project 小标题分段；
@@ -55,7 +55,7 @@ import { registerMemoryTools, setMemoryToolGate, type MemoryWriteEvent, type Mem
 import { requestThemeProposal, judgeThemeMatch } from './llm-judge.js'
 import { resolveSlotText, setPromptLang } from './prompt-loader.js'
 
-/** 首建提示的 accessed 哨兵（issue #37 增量①；per-session 至多一次）。 */
+/** 首建提示的 accessed 哨兵（增量①；per-session 至多一次）。 */
 const FIRST_CREATE_NOTICE_SEEN_ID = '__firstCreateNotice__'
 import { collectDreamStates, headerOf, DreamStateBroadcast, type PersistedSessionLike } from './dream-signal.js'
 
@@ -101,15 +101,9 @@ function createMemoryNoticeMessage(text: string): ReturnType<typeof createUserMe
   })
 }
 
-/**
- * 记忆系统静态手册 —— 挂进 system prompt（order 130 = 工具指南区间末尾，
- * 紧随各 tool:* 说明（100–116）之后，与工具说明列在一起）。
- * 文本恒定、不随会话变化 → 前缀稳定，KV 缓存友好；动态记忆内容（soul/user/
- * 导引/命中）仍走首条消息注入。文案与 tools.ts 的工具 schema 保持一致。
- */
 /** system prompt 手册（文案外置 v0.19.0）：prompts/zh/system-guide.md，运行时读取——
  *  改 md 文件下一次 apply / 热重载后生效，无需改代码。文本恒定、不随会话变化 →
- *  前缀稳定，KV 缓存友好；动态记忆内容（soul/user/导引/命中）仍走首条消息注入。
+ *  前缀稳定，KV 缓存友好；动态记忆内容（soul/rules/导引/命中）仍走首条消息注入。
  *  文案与 tools.md 的工具 schema 保持一致。
  */
 export function getMemoryGuide(): string {
@@ -143,7 +137,7 @@ function perfEvent(): void {
   }
 }
 
-// ── 主目录日志清扫（48h 保留 + perf.log 大小轮转；用户拍板 2026-09-24） ──────
+// ── 主目录日志清扫（48h 保留 + perf.log 大小轮转） ──────
 // 白名单精确点名，绝不 glob 目录——~/.dsh-scope 下还住着 window-index.json、
 // prompts/ 等非日志住户。判定用文件 mtime（append
 // 天然维护，恒等于最后一行的时刻，零解析）；双实例共享本目录时，活跃实例持续
@@ -219,7 +213,7 @@ const config = z.object({
   titleMax: z.number().min(10).max(200).default(40),
   /** 是否在 ReAct 任务结束后自动注入反思。 */
   reflect: z.boolean().default(true),
-  /** 单任务内连续工具 step 达到该值才在结束时触发反思（用户拍板：react ≥7 轮）。 */
+  /** 单任务内连续工具 step 达到该值才在结束时触发反思（react ≥7 轮）。 */
   reflectTurns: z.number().min(1).max(50).default(7),
   /** prompt 语言（prompts/<lang>/ 语言包目录名）：决定注入/反思/dream 文案、工具
    *  描述与 BM25 分词的语言。**首次使用建议显式配置**——记忆条目语言必须与 BM25
@@ -232,7 +226,7 @@ const config = z.object({
   dream: z
     .object({
       enabled: z.boolean().default(true),
-      /** 窗口空闲多少分钟后允许 dream（用户拍板 2026-08-19：3 小时）。 */
+      /** 窗口空闲多少分钟后允许 dream（3 小时）。 */
       idleMinutes: z.number().min(1).default(180),
       /** 抑制时段（目标时区，"HH:MM" 起止）：这些时段内不触发 dream。 */
       suppressWindows: z
@@ -436,7 +430,7 @@ function resolveConfig(config: unknown): ResolvedConfig {
       rulesReviewDays: d.rulesReviewDays ?? DEFAULT_RULES_REVIEW_DAYS,
     },
     delegate: (() => {
-      // 反思/梦境永远 steer（主窗口执行，v0.24 拍板）；modelSpec 仅供 agent/request
+      // 反思/梦境永远 steer（主窗口执行）；modelSpec 仅供 agent/request
       // waterfall 在插件轮请求上覆盖模型（轮次结束自动换回主模型）。
       return { modelSpec: parseModelSpec(dg.model) }
     })(),
@@ -602,7 +596,7 @@ function installSettingsSectionCompat(
     // describe 自动表单渲染，值读写走上方 describe/write 兼容腿——本函数无可注册项，
     // 静默跳过。其余未知宿主：设置页本就不可用，warn 留痕（与注册失败 catch 路径同
     // 口径）。原实现在此 throw，但它落在 inject 回调里、外层 catch 接不住，只会每轮
-    // 装配刷一条误导性 error（issue #34：功能其实全部正常），故一律不再抛。
+    // 装配刷一条误导性 error（功能其实全部正常），故一律不再抛。
     const proto = Object.getPrototypeOf(settings) as { describe?: unknown } | null
     if (proto !== null && typeof proto.describe === 'function') return
     ownerCtx.logger.warn('meow-memory: settings 服务无 installSection/register（非 0.1.7+ 形态），跳过设置区注册（配置走 patch 层）')
@@ -628,11 +622,11 @@ function installSettingsSectionCompat(
   })
 }
 
-/** 等设置源就绪的上限（issue #21）。真机上 inject 回调最快一个微任务就会跑，
+/** 等设置源就绪的上限。真机上 inject 回调最快一个微任务就会跑，
  *  这里给足余量；仅当 settings 服务异常/注册回调始终不回填时才真的等满。 */
 const SETTINGS_SOURCE_WAIT_MS = 250
 
-// ── 活配置（issue #26）────────────────────────────────────────────────────────
+// ── 活配置────────────────────────────────────────────────────────
 // 250ms 有界等待在重 profile 上必输（实测 settings 命名空间晚 5.5s 就绪），输掉后
 // settingsGet 恒 undefined、resolved 全按出厂默认跑满进程生命周期——onChange 只热切
 // homeDir，meta.volatile 在 cordis 中无实现（死标记），「重载后生效」对绝大多数字段
@@ -641,7 +635,7 @@ const SETTINGS_SOURCE_WAIT_MS = 250
 // 引用相等的前提：0.1.3+ installSection 作用域在写入提交前返回同一 frozen 对象
 // （commit 时才换引用），引用没变即未变，读取近乎零成本；0.1.7 describe 壳每次
 // 调用全量重建（引用恒新）→ 毫秒级节流兜底最坏路径。
-// ⚠️ 接线坑（#26 报告人 v1 实机踩坑）：settingsGet 本身是个函数（()=>scope.get()），
+// ⚠️ 接线坑（实机踩坑）：settingsGet 本身是个函数（()=>scope.get()），
 // 外层必须再包一层 thunk 捕获 applyInner 作用域里那个稍后才赋值的 let——把函数本体
 // 当源传进去，引用恒定 → 缓存永不失效 → 单测全绿而实机仍按启动默认值跑。
 // 注册期消费的字段（projectDir/homeDir/enabled/delegate.modelSpec + setPromptLang 的
@@ -724,7 +718,7 @@ function logHomeDirSwitch(ctx: Context, sw: ReturnType<typeof switchHomeDir>): v
   }
 }
 
-/** 设置页保存后的全局目录热切换（fire-and-forget，用户拍板 2026-09-24）：搬移可能
+/** 设置页保存后的全局目录热切换（fire-and-forget）：搬移可能
  *  跨盘复制（秒级），异步执行不阻塞保存链路；窗口期日志仍落旧目录（毫秒级），无碍。
  *  搬完把新目录的 window-index 账本 merge 进内存。切换失败只留日志，绝不影响保存。 */
 function hotSwitchHomeDir(ctx: Context, config: unknown, get: (() => unknown) | undefined): void {
@@ -759,10 +753,10 @@ async function applyInner(ctx: Context, config: unknown): Promise<void> {
   // base 通道只认 register 显式传参。
   // 0.1.7 腿：register 已被宿主删除，base 视图改由宿主拿 Config schema 深填默认值
   // （resolveConfig(inherited)）——预填全部声明进 schema（含 homeDirPresets），这里
-  // 不再需要任何手动注入。patch config 段已随全等比对死锁退役（2026-09-25）。
+  // 不再需要任何手动注入。patch config 段已随全等比对死锁退役。
   const settingsBase = { ...mergeConfigLayer(CONFIG_DEFAULTS, config), homeDirPresets: homeDirPresets() } as Record<string, unknown>
   let settingsGet: (() => unknown) | undefined
-  // 设置源就绪信号（issue #21）：ctx.inject(deps, cb) 的回调**永远不会同步执行**——它
+  // 设置源就绪信号：ctx.inject(deps, cb) 的回调**永远不会同步执行**——它
   // 等价于 ctx.plugin({ inject, apply })，插件体跑在异步启动的子 fiber 里（cordis
   // lib/index.js:1599），依赖是否已就绪都一样。原实现「注册完紧接着下一行读 setSource
   // 回填的 getter」因此必然拿到 undefined：settings.yaml / 设置页的 user 层从未进过
@@ -771,7 +765,7 @@ async function applyInner(ctx: Context, config: unknown): Promise<void> {
   let markSourceReady: (() => void) | undefined
   const sourceReady = new Promise<void>((resolve) => { markSourceReady = resolve })
   let sourceWaitArmed = false
-  // 活配置的 promptLang 热刷新出口（issue #26）：onChange / 0.1.7 写入壳回调。两者都
+  // 活配置的 promptLang 热刷新出口：onChange / 0.1.7 写入壳回调。两者都
   // 可能在 resolved 初始化之前同步触发（0.1.6 旧路径 installSettingsSectionCompat 的
   // register 分支注册期就调一次 onChange）——holder 未置入时静默跳过，绝不能在
   // inject 回调里踩 TDZ 把设置区注册炸掉。
@@ -799,11 +793,11 @@ async function applyInner(ctx: Context, config: unknown): Promise<void> {
         },
         onChange: (): void => {
           ctx.logger.info('meow-memory: 配置已通过设置页更新（重载/重启插件后生效）')
-          // homeDir 热切换（用户拍板 2026-09-24：保存后立即生效，无需重启）——
+          // homeDir 热切换（保存后立即生效，无需重启）——
           // 全局目录消费点全是轻量读写（日志追加/小 JSON/按需读覆盖层），切模块级
           // 状态口即可，dsh 主进程不重启、插件不重载、在跑会话无感知。
           hotSwitchHomeDir(ctx, config, settingsGet)
-          // promptLang 热字段刷新（issue #26）：运行时 T() 文案随活配置切换；工具
+          // promptLang 热字段刷新：运行时 T() 文案随活配置切换；工具
           // 描述与 system prompt 手册段在注册期定型，保持启动语言直到重载。
           refreshPromptLang()
         },
@@ -815,7 +809,7 @@ async function applyInner(ctx: Context, config: unknown): Promise<void> {
     const msg = `meow-memory: 设置命名空间注册失败（标签页不可用，配置走 patch 层）：${e instanceof Error ? (e.stack ?? e.message) : String(e)}`
     ctx.logger.warn(msg)
   }
-  // 有界等待设置源就绪（issue #21）：真机上回调一个微任务内就跑完，不会真的等到上限；
+  // 有界等待设置源就绪：真机上回调一个微任务内就跑完，不会真的等到上限；
   // 服务缺失/注册失败时最多等 SETTINGS_SOURCE_WAIT_MS 就继续，绝不挂起。
   if (sourceWaitArmed) {
     await Promise.race([
@@ -824,7 +818,7 @@ async function applyInner(ctx: Context, config: unknown): Promise<void> {
     ])
   }
   const merged = mergeConfigLayer(config, settingsGet?.() as Record<string, unknown> | undefined)
-  // 活配置（issue #26）：热字段 getter 化——settings 命名空间晚于有界等待就绪时，
+  // 活配置：热字段 getter 化——settings 命名空间晚于有界等待就绪时，
   // 注册期字段（projectDir/homeDir/enabled/delegate）按 patch 层默认值生效（本次
   // 启动内不纠正），运行时反复读取的热字段（注入/反思/dream 全系）在命名空间就绪
   // 后的下一次读取自动纠正，不再需要重启。
@@ -832,9 +826,9 @@ async function applyInner(ctx: Context, config: unknown): Promise<void> {
   const resolved = applyLiveConfig(resolveConfig(merged), readLiveConfig)
   resolvedView = resolved
   if (sourceWaitArmed && settingsGet === undefined) {
-    ctx.logger.warn('meow-memory: settings 服务在有界等待内未就绪——注册期字段本次启动按 patch 层默认值生效（需重载纠正）；热字段（注入/反思/dream）会在命名空间就绪后自动纠正（issue #26）')
+    ctx.logger.warn('meow-memory: settings 服务在有界等待内未就绪——注册期字段本次启动按 patch 层默认值生效（需重载纠正）；热字段（注入/反思/dream）会在命名空间就绪后自动纠正')
   }
-  // ── 记忆门控（issue #38/#28）───────────────────────────────────────────────
+  // ── 记忆门控───────────────────────────────────────────────
   // 工作区停用（#28）：disabledWorkspaces 名单（cwd 归一匹配）= 硬开关，读/整理/写
   // 全拒（含手动 /dream）。窗口级三档（#38）写 dream_skip 表：skip_dream（跳过整理）
   // / skip_inject（停止读入）/ skip_write（停止写入，整理轮豁免——写入档只管普通轮）。
@@ -872,7 +866,7 @@ async function applyInner(ctx: Context, config: unknown): Promise<void> {
   // ── 全局目录解析+切换（含首迁/回迁）：必须先于 sweep/loadWindowIndex——它们吃新目录。
   // disabled 检查之前执行：插件停用时配置变更也要生效（switchHomeDir 幂等，重复启动无害）。
   logHomeDirSwitch(ctx, switchHomeDir(resolveHomeDir(resolved.homeDir)))
-  // 诊断（issue #26）：把「设置源是否赶上」与关键解析值落到启动日志——配置不生效类
+  // 诊断：把「设置源是否赶上」与关键解析值落到启动日志——配置不生效类
   // 报告先看这一行：sourceReady=否 即冷启动竞态（settings 服务晚于等待上限就绪）。
   ctx.logger.info(`meow-memory: config resolved (sourceReady=${settingsGet !== undefined}, enabled=${resolved.enabled}, dream.enabled=${resolved.dream?.enabled ?? 'default'}, promptLang=${resolved.promptLang ?? 'zh'}, projectDir=${resolved.projectDir ?? '.dsh-scope'})`)
   if (!resolved.enabled) {
@@ -895,9 +889,9 @@ async function applyInner(ctx: Context, config: unknown): Promise<void> {
 
   // 工具注册 + disposer 收集：热重载/重启时旧 fiber 的工具必须注销，
   // 否则新 apply 重复注册同名工具会抛异常 → apply 中断 → 工具/手册/pre-step 全失效
-  // （真机踩坑 2026-08-17：04:35 配置变更触发的 reload 后首轮注入消失）。
+  // （配置变更触发的 reload 后，首轮注入会消失）。
   const toolDisposers: Array<() => void> = []
-  // 记忆门控判定器（issue #38/#28）：工具层经 setMemoryToolGate 读取（活配置闭包）。
+  // 记忆门控判定器：工具层经 setMemoryToolGate 读取（活配置闭包）。
   // 写档的整理轮豁免 = isPluginTurn（dream/reflect 指令轮的标记，本文件事件链维护）。
   setMemoryToolGate({
     refuseRead: (ws, sid) => {
@@ -1135,7 +1129,7 @@ async function applyInner(ctx: Context, config: unknown): Promise<void> {
     const dispose = ctx.tools.register(t)
     if (typeof dispose === 'function') toolDisposers.push(dispose)
   }, resolved.projectDir, onMemoryWrite, applyTheme)
-  // 会话列表"已 dream"小月牙信号（用户拍板 2026-08-19）：dream 开始推 dreaming、
+  // 会话列表"已 dream"小月牙信号：dream 开始推 dreaming、
   // 完成推 dreamed、有新活动推 active。
   const broadcast = new DreamStateBroadcast(ctx.logger)
   // dream 收尾钩子（#37 增量②）：开启备份时把 memory.db 快照轮转到 .bak（mtime 判
@@ -1292,7 +1286,7 @@ async function applyInner(ctx: Context, config: unknown): Promise<void> {
           }
         }
       }
-      // dream 轮失败即时处理（issue #36 建议二）：宿主的 agent/turn-stopping 只在
+      // dream 轮失败即时处理（建议二）：宿主的 agent/turn-stopping 只在
       // 「某个 step 成功完成后」发射（dsh-agent-loop turn 循环内唯一发射点，且发射时
       // 本轮 turn/end 还没落日志），首个 step 之前的失败（空 options 装配抛错、
       // pre-step reject 等）永远走不到那里——turn-stopping 的 error 分支对这类失败是
@@ -1316,7 +1310,7 @@ async function applyInner(ctx: Context, config: unknown): Promise<void> {
     // 子代理会话不进窗口表/windowIndex：origin==='subagent'（dsh 权威标记，与注入链
     // 同口径）。子代理的记忆活动按归属语义记父窗口名下，自身不是 dream 目标——否则
     // dream fork 出的子代理会话也成待 dream 窗口，dream→再进表→再 dream 递归套娃
-    // （2026-09-05 真机实证 8fbc5d59→2f47c15b→63dad87b，depth 无限增长）。
+    // （depth 会无限增长）。
     // 压缩信号处理在上方，不受此 return 影响。
     if (session?.header?.origin === 'subagent') return
     if (typeof sid !== 'string' || typeof cwd !== 'string' || typeof event?.time !== 'number') return
@@ -1333,17 +1327,17 @@ async function applyInner(ctx: Context, config: unknown): Promise<void> {
     persistWindowIndex() // 窗口索引落盘（热重载/重启后恢复）
   })
 
-  // 1) 注入：首轮快照（soul/user/设计原则/导引，仅一次）+ 命中链路（每 hitEveryN 个真实用户轮触发一次）。
-  // 首轮判定（真机踩坑 2026-08-16）：不能看 decision.messages[0]——首条用户消息可能与
+  // 1) 注入：首轮快照（soul/设计原则/导引，仅一次）+ 命中链路（每 hitEveryN 个真实用户轮触发一次）。
+  // 首轮判定：不能看 decision.messages[0]——首条用户消息可能与
   // 插件通知消息同批到达（如 user-approval 的 policy 变更通知，source.kind='plugin'），
   // messages[0] 未必是用户消息。正确判定 = 本会话日志里还没有任何 user/message
   // （harness 在 pre-step 之后才 append 当前消息，首条消息时日志必为空）+ 消息列表里
   // 存在真实用户消息（source.kind === 'user'）。
-  // 首条消息：只注入长期记忆快照，绝不跑命中链路（用户拍板：命中从第二轮起，默认每 2 轮）。
+  // 首条消息：只注入长期记忆快照，绝不跑命中链路（命中从第二轮起，默认每 2 轮）。
   // 进程重启后恢复的会话：日志已有 user/message → 视为首轮已注入，只走命中链路。
   const firstUserHandled = new Set<string>()
   const hitTurnHandled = new Map<string, number>()
-  // 热路径 fail-open（2026-09-10）：pre-step 是 async 监听器，插件逻辑抛错会沿
+  // 热路径 fail-open：pre-step 是 async 监听器，插件逻辑抛错会沿
   // agent-loop 传播改变宿主 turn 的错误语义。包装器单独持有 next()——宿主 step
   // 自身的错误原样上抛（abort 语义在内），只有本插件自己的注入/检索失败才吞掉
   // （放弃本轮注入、放行原始 decision，与本插件其余路径的 fail-open 同风格）。
@@ -1367,7 +1361,7 @@ async function applyInner(ctx: Context, config: unknown): Promise<void> {
     if (decision.messages.length === 0) return decision
     // 子代理不注入（origin === 'subagent'，dsh 权威标记）：它们的 prompt 由父代理提供
     // （如 dsh-project-a 的角色上下文）。注意不能只看 parentSession——GUI fork/续写的
-    // 主会话也有 parentSession（真机踩坑 2026-08-17：fca10feb 被误判为子代理导致注入全失效）。
+    // 主会话也有 parentSession（据此判定父子会误伤，导致注入全失效）。
     if (agent.session.header.origin === 'subagent') return decision
     registerLiveAgent(agent)
     const sid = sessionIdOfAgent(agent)
@@ -1378,7 +1372,7 @@ async function applyInner(ctx: Context, config: unknown): Promise<void> {
     const userMsgs = decision.messages.filter((m: { source?: { kind?: string } }) => m.source?.kind === 'user')
     if (userMsgs.length === 0) return decision // 工具轮/纯插件消息：不注入
 
-    // 记忆门控（issue #38/#28）：本窗口「停止读入」或工作区被配置停用 → 跳过全部
+    // 记忆门控：本窗口「停止读入」或工作区被配置停用 → 跳过全部
     // 注入路径（重注入/首轮快照/引导/命中链）。读的入口统一在此封口。
     if (ws !== null && memoryReadOff(ws, sid)) return decision
     const switches = memorySwitches(ws)
@@ -1388,7 +1382,7 @@ async function applyInner(ctx: Context, config: unknown): Promise<void> {
       if (evt?.type === 'user/message' && evt.data?.source?.kind === 'user') priorUser++
     }
 
-    // 压缩重注入（v0.21.0）：compaction/end 成功后置位的待办——下一个含真实用户
+    // 压缩重注入：compaction/end 成功后置位的待办——下一个含真实用户
     // 消息的请求在消息前注入「长期记忆快照 + 本会话此前查阅过的项目全景」，然后清待办。
     // 本轮不跑命中链路（等同新首轮：快照先行，命中从下一轮起）。待办置位但无可注入
     // 内容（库空且项目全空）也一并清除，避免每个用户消息轮空转重查。
@@ -1437,7 +1431,7 @@ async function applyInner(ctx: Context, config: unknown): Promise<void> {
             return { ...decision, messages: rewritten }
           }
         }
-        // 首建提示（issue #37 增量①）：记忆库还是空的（≈刚创建）时，随首轮注入一条
+        // 首建提示（增量①）：记忆库还是空的（≈刚创建）时，随首轮注入一条
         // 独立通知——库在工作区隐藏目录、误删不 recover，memory_home 可迁出、backup
         // 可兜底。记账 = accessed 痕迹（per-session 至多一次；库有记忆后 isFresh=false
         // 永久短路）。fail-open：任何失败只跳过提示。
@@ -1513,7 +1507,7 @@ async function applyInner(ctx: Context, config: unknown): Promise<void> {
   // 2) turn 结束：dream 轮推进 / 自动反思。
   // 同 pre-step 的 fail-open：同步监听器里抛错（如 advanceDream→steer、DB 读）不允许
   // 改变宿主 turn 收尾语义，吞掉记日志（dream 租约有过期自愈兜底，不会因此卡死）。
-  // 反思排队判重（issue #19）：sendMemoryTurn 走 followup 把反思排进「下一轮」，它不在
+  // 反思排队判重：sendMemoryTurn 走 followup 把反思排进「下一轮」，它不在
   // 本 turn 的事件流里，于是 scanTurn().sawReflect 在本 turn 收尾期间恒为 false。0.26.0
   // 起 turn-stopping 在一次收尾窗口内会触发多次（每个 step 收尾、被其它插件 steer 续命
   // 后再触发），每次都再排一条，排 N 条就被后面 N 个 turn 依次消费——真机实测同一反思
@@ -1564,7 +1558,7 @@ async function applyInner(ctx: Context, config: unknown): Promise<void> {
       return
     }
 
-    // 窗口/工作区整理门控（issue #38/#28）：「跳过整理」或工作区停用 → 自动反思一并
+    // 窗口/工作区整理门控：「跳过整理」或工作区停用 → 自动反思一并
     // 挡下（手动 /dream 不受限，手动=明确意愿）。dream 轮推进在上方分支已处理，不受此守卫影响。
     if (wsTs !== null) {
       try {
@@ -1582,13 +1576,13 @@ async function applyInner(ctx: Context, config: unknown): Promise<void> {
       reflectQueuedTurn.delete(sidTs) // 本 turn 已反思过（含反思轮自身结束）：排队痕迹用完即清
       return
     }
-    // 本 turn 已经排过一条（followup 排在 next-turn，事件流里还看不见）→ 不再重复排（issue #19）
+    // 本 turn 已经排过一条（followup 排在 next-turn，事件流里还看不见）→ 不再重复排
     if (turn !== undefined && reflectQueuedTurn.get(sidTs) === turn) return
     if (!sawToolCall) return // 纯聊天轮，不反思
     if (lastToolName !== undefined && lastToolName.startsWith('memory_')) return // 已主动记忆
     if (consecutiveToolSteps(sessionEventsOf(agent.session)) < memorySwitches(wsTs).reflectTurns) return // 单任务内连续工具 step 不足
     const message = buildReflectMessage(ws, turnText, resolved.projectDir)
-    // 反思任务送主会话独立新轮（v0.24 拍板进主会话；2026-09-10 起走 followup 另起
+    // 反思任务送主会话独立新轮（走 followup 另起
     // 一轮——steer 延续同 turn 会把 AI 的工作汇报顶成中间步骤，见 sendMemoryTurn）。
     // 换模型由下方 agent/request waterfall 承接——本 turn 带 REFLECT_MARKER 时自动覆盖模型。
     if (sendMemoryTurn(agent, message, ws, resolved.projectDir, `reflect sid=${shortSessionId(sidTs)}`)) {
@@ -1694,7 +1688,7 @@ async function applyInner(ctx: Context, config: unknown): Promise<void> {
         path: '/meow-memory/dream-events',
         handler: (req, res) => broadcast.handle(req as never, res as never),
       })
-      // 记忆参与门控（v0.16.0 跳过 dream → v0.30.0 三档门控，issue #38 的数据面）：
+      // 记忆参与门控（v0.16.0 跳过 dream → v0.30.0 三档门控的数据面）：
       //    - GET  /meow-memory/skip-dreams → { sessionIds, scopes }（全部已知工作区
       //      合并；scopes = 每窗口三档明细，sessionIds 保留旧客户端的 dream 档子集）；
       //    - POST /meow-memory/skip-dreams { sessionId, field, value }（三档）或
@@ -2066,7 +2060,7 @@ async function resolveWorkspaceForSession(ctx: Context, sessionId: string): Prom
       | { list?: () => Promise<ReadonlyArray<PersistedSessionLike>> }
       | undefined
     const sessions = typeof sp?.list === 'function' ? await sp.list() : []
-    // 双版本形状（2026-09-10）：0.1.2- 扁平 SessionHeader / 0.1.3+ Snapshot{header}，headerOf 统一取。
+    // 双版本形状：0.1.2- 扁平 SessionHeader / 0.1.3+ Snapshot{header}，headerOf 统一取。
     const hit = sessions.map(headerOf).find((h) => h.id === sessionId)
     if (hit && typeof hit.cwd === 'string' && hit.cwd.length > 0) {
       windowIndex.set(sessionId, hit.cwd)
@@ -2104,7 +2098,7 @@ export function loadWindowIndex(dir = '.dsh-scope', indexFile = join(activeHomeD
     /* 无文件/损坏 */
   }
   for (const ws of workspaces) {
-    // 已删除的工作区不复活（issue #27）：目录没了、或从未建过库的，一律跳过——
+    // 已删除的工作区不复活：目录没了、或从未建过库的，一律跳过——
     // 绝不为「恢复索引」新建目录或空库（collectDreamStates / skip-dreams 同款守卫）。
     // json 里的 sid→workspace 映射不受影响（上面已恢复），只是不去打开它的库。
     if (!existsSync(ws) || !existsSync(memoryDbPath(ws, dir))) continue

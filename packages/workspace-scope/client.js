@@ -2820,7 +2820,15 @@ window.__ModuleLoader__.load({
           ctx.effect(() => () => uiStyle.remove(), 'workspace-scope: ui polish');
         }
 
-
+        // LOCAL-ONLY BEGIN: vertical footer layout, stripped from public release.
+        const footerStyle = document.createElement('style');
+        footerStyle.dataset.plugin = 'workspace-scope-footer-stack';
+        footerStyle.textContent = '[class*="footerActions"]{flex-direction:column;align-items:stretch;gap:2px}[class*="footerActions"]>*{width:100%;min-width:0}.workspace-scope-quarantine-entry{background:transparent;color:var(--dsw-alias-label-secondary,#555);transition:background-color .12s ease,color .12s ease}.workspace-scope-quarantine-entry:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06));color:var(--dsw-alias-label-primary,#111)}';
+        document.head.appendChild(footerStyle);
+        if (typeof ctx.effect === 'function') {
+          ctx.effect(() => () => footerStyle.remove(), 'workspace-scope: footer stack');
+        }
+        // LOCAL-ONLY END
 
         ctx.slots.inject('main', () => ctx.slots.register({
           name: 'main',

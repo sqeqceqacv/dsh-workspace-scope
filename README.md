@@ -2,6 +2,10 @@
 
 > 面向 DeepSeek Harness（DSH）的本地工作区策略与结构化记忆插件。
 
+> **本项目为非官方社区插件**，由社区开发者独立维护，与 DeepSeek 及其关联公司
+> 无任何隶属、合作或背书关系。DeepSeek Harness（DSH）及其相关商标归其权利人所有；
+> 本项目仅在描述兼容性时使用这些名称。使用本插件产生的数据与后果由使用者自行承担。
+
 **状态：v0.4.0 源码版，核心链路已实测通过（2026-11-08）。**
 
 当前不是 npm 发布包；desktop profile 只注册 `workspace-scope` 一个插件，仓库用于源码审查与本地安装。
@@ -20,7 +24,7 @@
 1. 克隆仓库：
 
    ```powershell
-   git clone <github-repo-url> C:\path\dsh-workspace-scope
+   git clone https://github.com/sqeqceqacv/dsh-workspace-scope.git C:\path\dsh-workspace-scope
    ```
 
 2. 备份当前 profile：
@@ -194,10 +198,20 @@ npm test
 - Ollama 等 provider 的模型列表尚未逐一实测；
 - 侧栏底部入口保留；强制竖排布局属于本地补丁，不随公开发行；
 - 本地 HTTP API 依赖 DSH 的同源校验，不额外提供 token；请勿将 DSH 暴露到局域网；
-- 工具开关在每次 system-prompt 装配时重新计算；当前回合已加载的工具集可能要到下一轮消息才刷新，无需新开会话；
+- 工具开关在每次 system-prompt 装配时重新计算；当前回合已加载的工具集可能要到下一轮消息才刷新，无需新开会话（推荐通过重启DSH刷新，此方式具有较强确定性）；
 - 内嵌 memory Host/Client 是编译产物，改了 `dsh-meow-scope` 源码后必须运行 `scripts/embed-meow-scope.mjs`；
 - CI 覆盖策略、全局 RULE 与记忆单元测试，不覆盖真实 DSH 页面交互；
 - v0.4.0 暂不提供 npm 包。
+
+## 数据流向
+
+- **工作区策略**：保存在 `<workspace>/.dsh-scope/policy.json`，仅本工作区读取；
+- **记忆库**：保存在 `<workspace>/.dsh-scope/memory.db`（SQLite + WAL，未加密，含个人记忆正文），默认不进入 git；
+- **记忆工具**：读写本地 SQLite，不经过插件自有服务器；
+- **主题 judge / dream**：启用后，相关记忆片段、工作区名称和整理请求会通过 DSH 当前配置的模型 provider 发送给该 provider；是否出网取决于 provider，插件本身不内置外部服务；
+- **会话日志**：位于 `$DSH_HOME/sessions/`；dream 整理时会遍历本工作区对应的会话日志（用于恢复上次模型路由与整理上下文），不依赖用户询问；模型在对话中读取会话原文时，受系统提示中的会话访问与凭据约束；
+- **HTTP API**：仅提供本地 Host API，依赖 DSH 的同源校验，不额外提供 token；不要将 DSH 暴露到局域网；
+- **遥测**：插件不内置遥测、不主动上报使用数据；第三方依赖见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
 
 ## 文档
 
@@ -208,4 +222,4 @@ npm test
 
 `packages/dsh-meow-scope` 是 [`Phant0Meow/dsh-meow-memory`](https://github.com/Phant0Meow/dsh-meow-memory) 的工作区分支 fork，遵循其 MIT 许可证，详见 [`packages/dsh-meow-scope/LICENSE`](packages/dsh-meow-scope/LICENSE)。
 
-本仓库采用 MIT License，详见根目录 [`LICENSE`](LICENSE)；上游归属与 fork 说明见 [`NOTICE`](NOTICE)。
+本仓库采用 MIT License，详见根目录 [`LICENSE`](LICENSE)；上游归属与 fork 说明见 [`NOTICE`](NOTICE)。第三方依赖与许可文本见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。

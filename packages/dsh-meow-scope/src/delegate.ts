@@ -2,7 +2,7 @@
  * meow-memory — 整理任务的模型 spec 解析 + 历史 delegate 打点标记。
  *
  * v0.24 起反思/梦境**永远在主窗口执行**（steer），独立 fork 子代理链路整体移除
- * （用户 2026-09-06 拍板：设置里不再提供"独立执行"选项，代码永远走 steer 分支）。
+ * （设置里不再提供"独立执行"选项，代码永远走 steer 分支）。
  * 换模型不再依赖 fork：agent/request waterfall（dsh 官方单请求换模型扩展点）在
  * 反思/梦境轮的请求上覆盖 provider/model，轮次结束自动换回主模型（index.ts 实现）。
  *

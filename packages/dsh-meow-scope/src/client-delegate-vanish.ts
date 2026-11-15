@@ -1,7 +1,7 @@
 /**
  * meow-memory — header 子代理列表隐身（client 端，vanish 链路）。
  *
- * 目标（用户 2026-09-03 拍板）：delegate 反思/梦境 fork 子代理**全程**不出现在
+ * 目标：delegate 反思/梦境 fork 子代理**全程**不出现在
  * header 的子代理列表（SubagentHeaderLineage）里——行与 "N subagents" 数字
  * trigger 都不出现；后台任务的存在感由主会话的打点气泡承担。
  *

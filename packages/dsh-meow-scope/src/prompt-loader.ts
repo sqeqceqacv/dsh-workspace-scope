@@ -1,7 +1,7 @@
 /**
- * meow-memory — prompt 文案加载器（v0.19.0：prompt 文案外置为数据文件）。
+ * meow-memory — prompt 文案加载器（prompt 文案外置为数据文件）。
  *
- * 目标（用户拍板 2026-08-27）：
+ * 目标：
  * - prompt 文案 = 数据而非代码：所有注入给模型的文案存 prompts/<lang>/*.md，
  *   代码运行时读取。用户改文案 = 改文件（无需改代码/重新构建），下一次构建 prompt 时生效。
  * - 语言包 = 一个子目录：promptLang config 选择子目录（本步固定 zh，config 后续版本接线）；

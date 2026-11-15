@@ -1300,7 +1300,7 @@ var MemoryDb = class {
     this.upgrade();
   }
   /** 幂等升级：缺列补列；旧 UUID id 按 created_at 重排为时间前缀 id；
-   *  v0.7.0：dream_at 列并入 updated_at（记忆时间戳=最后更新时间）后删除。 */
+   *  dream_at 列并入 updated_at（记忆时间戳=最后更新时间）后删除。 */
   upgrade() {
     for (const level of LEVELS) {
       const cols = new Set(
@@ -1502,7 +1502,7 @@ var MemoryDb = class {
     return out;
   }
   /** 可检索条目：active 全部；project.subcategory='todo' 的 stale 视为 done 参与检索。
-   *  （用户拍板：todo 过时=finish 可检索，其他类别过时不检索。） */
+   *  （todo 过时=finish 可检索，其他类别过时不检索。） */
   listSearchable(level) {
     const active2 = this.list(level, { status: "active" });
     if (level !== "project") return active2;
@@ -1622,7 +1622,7 @@ var MemoryDb = class {
   releaseDream(sessionId) {
     this.db.prepare(`UPDATE windows SET dream_owner = NULL, dream_started_at = NULL, dream_progress_at = NULL, dream_group_idx = NULL, dream_T = NULL WHERE session_id = ?`).run(sessionId);
   }
-  // ── dream 失败计数（issue #36）──────────────────────────────────────────────
+  // ── dream 失败计数──────────────────────────────────────────────
   // 存 dream_meta（KV，跨实例/重启共享）：`dreamfail_c:<sid>` = 连续失败次数、
   // `dreamfail_t:<sid>` = 计数对应的整理范围 T。T 变了（窗口有新活动 → 新一轮整理
   // 范围不同）自动从 1 重计；dream 收尾（finishDream）清零。与 releaseDream 的
@@ -1674,7 +1674,7 @@ var MemoryDb = class {
   touchDreamLease(sessionId) {
     return this.db.prepare(`UPDATE windows SET dream_progress_at = ? WHERE session_id = ? AND dream_owner IS NOT NULL`).run(Date.now(), sessionId).changes === 1;
   }
-  // ── dream_skip 门控表（v0.16.0 跳过 dream → v0.30.0 升级为「记忆参与」三档门控，#38）──
+  // ── dream_skip 门控表（v0.16.0 跳过 dream → v0.30.0 升级为「记忆参与」三档门控）──
   // 一行 = 一个窗口的门控状态：skip_dream（跳过整理：自动 dream + 自动反思）、
   // skip_inject（停止读入：首轮快照/命中/重注入/search/read 等读入口）、skip_write
   // （停止写入：普通轮的 remember/update；整理轮写入跟随整理档）。三档全 false 删行。
@@ -4705,7 +4705,7 @@ function scheduleDream(ctx, cfg, dir = ".dsh-scope", windowIndex2, onDreamState,
       c = read();
       if (c !== void 0 && c.enabled !== lastEnabled) {
         lastEnabled = c.enabled;
-        ctx.logger.info(`meow-memory: dream \u8C03\u5EA6\u5668${c.enabled ? "\u542F\u7528" : "\u505C\u7528"}\uFF08\u914D\u7F6E\u70ED\u751F\u6548\uFF0Cissue #26\uFF09`);
+        ctx.logger.info(`meow-memory: dream \u8C03\u5EA6\u5668${c.enabled ? "\u542F\u7528" : "\u505C\u7528"}\uFF08\u914D\u7F6E\u70ED\u751F\u6548\uFF09`);
       }
       dreamSweepTick(ctx, c, dir, windowIndex2, onDreamState, workspaceDisabled);
     } finally {
@@ -4965,7 +4965,7 @@ var DreamStateBroadcast = class {
     this.write(sessionId, state);
   }
   /**
-   * 广播一次门控变化（issue #38：state='scope' + field/value 明细）。
+   * 广播一次门控变化（state='scope' + field/value 明细）。
    * dream 档变化时 host 会同时广播旧 'skip'/'unskip'（dream-icon 旧通道兼容），
    * inject/write 档只有 scope 事件——面板与行图标的新变体消费它。
    */
@@ -5111,7 +5111,7 @@ var config = Schema.object({
   titleMax: Schema.number().min(10).max(200).default(40),
   /** 是否在 ReAct 任务结束后自动注入反思。 */
   reflect: Schema.boolean().default(true),
-  /** 单任务内连续工具 step 达到该值才在结束时触发反思（用户拍板：react ≥7 轮）。 */
+  /** 单任务内连续工具 step 达到该值才在结束时触发反思（react ≥7 轮）。 */
   reflectTurns: Schema.number().min(1).max(50).default(7),
   /** prompt 语言（prompts/<lang>/ 语言包目录名）：决定注入/反思/dream 文案、工具
    *  描述与 BM25 分词的语言。**首次使用建议显式配置**——记忆条目语言必须与 BM25
@@ -5123,7 +5123,7 @@ var config = Schema.object({
   /** 空闲整理（dream）。 */
   dream: Schema.object({
     enabled: Schema.boolean().default(true),
-    /** 窗口空闲多少分钟后允许 dream（用户拍板 2026-08-19：3 小时）。 */
+    /** 窗口空闲多少分钟后允许 dream（3 小时）。 */
     idleMinutes: Schema.number().min(1).default(180),
     /** 抑制时段（目标时区，"HH:MM" 起止）：这些时段内不触发 dream。 */
     suppressWindows: Schema.array(Schema.object({ start: Schema.string(), end: Schema.string() })).default([{ start: "09:00", end: "12:00" }, { start: "14:00", end: "18:00" }]),
@@ -5493,7 +5493,7 @@ async function applyInner(ctx, config2) {
   const resolved = applyLiveConfig(resolveConfig(merged), readLiveConfig);
   resolvedView = resolved;
   if (sourceWaitArmed && settingsGet === void 0) {
-    ctx.logger.warn("meow-memory: settings \u670D\u52A1\u5728\u6709\u754C\u7B49\u5F85\u5185\u672A\u5C31\u7EEA\u2014\u2014\u6CE8\u518C\u671F\u5B57\u6BB5\u672C\u6B21\u542F\u52A8\u6309 patch \u5C42\u9ED8\u8BA4\u503C\u751F\u6548\uFF08\u9700\u91CD\u8F7D\u7EA0\u6B63\uFF09\uFF1B\u70ED\u5B57\u6BB5\uFF08\u6CE8\u5165/\u53CD\u601D/dream\uFF09\u4F1A\u5728\u547D\u540D\u7A7A\u95F4\u5C31\u7EEA\u540E\u81EA\u52A8\u7EA0\u6B63\uFF08issue #26\uFF09");
+    ctx.logger.warn("meow-memory: settings \u670D\u52A1\u5728\u6709\u754C\u7B49\u5F85\u5185\u672A\u5C31\u7EEA\u2014\u2014\u6CE8\u518C\u671F\u5B57\u6BB5\u672C\u6B21\u542F\u52A8\u6309 patch \u5C42\u9ED8\u8BA4\u503C\u751F\u6548\uFF08\u9700\u91CD\u8F7D\u7EA0\u6B63\uFF09\uFF1B\u70ED\u5B57\u6BB5\uFF08\u6CE8\u5165/\u53CD\u601D/dream\uFF09\u4F1A\u5728\u547D\u540D\u7A7A\u95F4\u5C31\u7EEA\u540E\u81EA\u52A8\u7EA0\u6B63");
   }
   const workspaceDisabled = (ws) => workspaceDisabledMatch(readLiveConfig().disabledWorkspaces, ws);
   const memoryInactive = (ws) => !isMemoryEnabled(ws) || workspaceDisabled(ws);

@@ -1,7 +1,7 @@
 /**
  * meow-memory — dream 状态信号（host 端）。
  *
- * 会话列表"已 dream"小月牙图标的数据面（用户拍板 2026-08-19）：
+ * 会话列表"已 dream"小月牙图标的数据面：
  * - 全量快照：GET /meow-memory/dreamed-sessions → { sessionIds, dreamingIds }
  *   （client 挂载/重连时拉一次）；
  * - 增量信号：/meow-memory/dream-events 是 SSE 长连接，dream 开始推 dreaming、
@@ -18,7 +18,7 @@ import { existsSync } from 'node:fs'
 import { getDb, memoryDbPath } from './db.js'
 import { DREAM_LEASE_MS } from './dream.js'
 
-/** sessionPersistence.list() 元素的双版本形状（2026-09-10）：
+/** sessionPersistence.list() 元素的双版本形状：
  *  - dsh 0.1.2 及以下旧宿主：返回扁平 SessionHeader[]（id/cwd 直接在元素上）；
  *  - dsh 0.1.3+ 新宿主：返回 SessionPersistenceSnapshot[]（id/cwd 包在 header 里，
  *    另有 revision/eventCount/sizeBytes）。
@@ -111,7 +111,7 @@ export class DreamStateBroadcast {
   }
 
   /**
-   * 广播一次门控变化（issue #38：state='scope' + field/value 明细）。
+   * 广播一次门控变化（state='scope' + field/value 明细）。
    * dream 档变化时 host 会同时广播旧 'skip'/'unskip'（dream-icon 旧通道兼容），
    * inject/write 档只有 scope 事件——面板与行图标的新变体消费它。
    */

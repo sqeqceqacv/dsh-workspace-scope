@@ -7,7 +7,7 @@
  * 一行低调的注入 notice——存在感太弱，用户感知不到「整理发生过」。
  *
  * 本模块：识别打点节点 → 隐藏原生 notice 行 → 原位插入折叠横条同款的胶囊气泡。
- * 气泡文字随任务事实状态变化（用户拍板 2026-09-03：处理完了就应该显示处理完成；
+ * 气泡文字随任务事实状态变化（处理完了就应该显示处理完成；
  * 「三轮三个子代理都跑完了，才显示已完成」）：
  * - dream：接 /meow-memory/dreamed-sessions 对账 + /meow-memory/dream-events SSE
  *   （与 client-dream-icon 同数据源）——dreamed 事件在最后一组收尾时才推，天然满足
@@ -25,7 +25,7 @@
  * 与 client-fold 同款纪律：
  * - 纯计算（computeDelegateNotices）与 DOM（applyDelegateNotices）分层，纯计算可单测；
  * - DOM 操作幂等（锚点只建一次、文本变化才写）——MutationObserver 兜底重放不自我循环；
- * - 异常快照 fail-open：识别不了的节点绝不隐藏，保持可见（GitHub issue #2 教训）。
+ * - 异常快照 fail-open：识别不了的节点绝不隐藏，保持可见（教训）。
  */
 
 import type { ConversationSnapshot } from '@deepseek-ai/dsh-client-runtime/client'
@@ -124,7 +124,7 @@ function delegateVariantOf(node: NoticeNodeLike): DelegateVariant | undefined {
   const source = node.data?.source
   if (source === undefined || source === null || typeof source !== 'object') return undefined
   if (!isMeowSource(source)) return undefined
-  // v0.27.0+: 优先从 sections.__meta__ 读取；回退到旧 source.memory（兼容历史会话）
+  // 优先从 sections.__meta__ 读取；回退到旧 source.memory（兼容历史会话）
   const meta = extractMetaFromSections(source.sections) ?? source.memory
   const memKind = meta?.kind
   if (memKind === 'reflect-marker') return 'reflect'
@@ -139,7 +139,7 @@ function delegateVariantOf(node: NoticeNodeLike): DelegateVariant | undefined {
 }
 
 function delegateSessionIdOf(node: NoticeNodeLike): string | undefined {
-  // v0.27.0+: 优先从 sections.__meta__ 读取；回退到旧 source.memory（兼容历史会话）
+  // 优先从 sections.__meta__ 读取；回退到旧 source.memory（兼容历史会话）
   const meta = extractMetaFromSections(node.data?.source?.sections) ?? node.data?.source?.memory
   const sid = meta?.sessionId
   return typeof sid === 'string' && sid !== '' ? sid : undefined
@@ -176,7 +176,7 @@ function dreamRunning(sessionId: string | undefined): boolean {
 }
 void dreamRunning
 
-/** 气泡文案（用户拍板文案 + 折叠横条同款 ▸ 箭头）——纯映射，可单测。
+/** 气泡文案（含折叠横条同款 ▸ 箭头）——纯映射，可单测。
  *  dream 的 interrupted 优先于 running（中断是终态观感，重试由 host 自动进行）。
  *  文案经 i18n 层（跟随 DSH 语言设置），判定逻辑不变。 */
 export function delegateNoticeLabelFor(variant: DelegateVariant, running: boolean, interrupted = false): string {
@@ -203,7 +203,7 @@ export function delegateNoticeLabel(notice: DelegateNotice): string {
  */
 export function computeDelegateNotices(snapshot: ConversationSnapshot, now: number = Date.now()): DelegateNotice[] {
   // fail-closed：宿主快照形状变化（如新 dsh 前端 chat 缺失）时降级为不打点，
-  // 绝不抛错炸掉 dock（与 PR #11 client-fold 同款守卫）。
+  // 绝不抛错炸掉 dock（与 client-fold 同款守卫）。
   if (snapshot?.chat === undefined) return []
   const found: Array<{ key: string; variant: DelegateVariant; sessionId?: string; time?: number }> = []
   for (const key of snapshot.chat.order) {
@@ -245,7 +245,7 @@ export function computeDelegateNotices(snapshot: ConversationSnapshot, now: numb
 /** 注入模块 CSS（幂等：内容一致即复用；不一致（升级换 CSS/热重载）才删旧建新）。 */
 function ensureCss(): void {
   if (typeof document === 'undefined') return
-  // 已存在且内容一致即复用（2026-09-10）：applyDelegateNotices 由 80ms 防抖 observer
+  // 已存在且内容一致即复用：applyDelegateNotices 由 80ms 防抖 observer
   // 反复驱动（流式期间 ~12 次/秒），此前每次都删了重建 style 标签（纯浪费，无功能问题）。
   // 注意不能无脑「存在即 return」——热重载时 dispose 不删 style，升级换 CSS 后旧规则
   // 会残留（同 client.ts 注释的教训），所以比对内容：一致复用、不一致才重建。

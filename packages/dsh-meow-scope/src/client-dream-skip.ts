@@ -1,6 +1,6 @@
 /**
  * meow-memory — 会话菜单「记忆参与」门控（client 端，v0.16.0 跳过 dream → v0.30.0
- * 三档门控 + 面板交互，issue #38/#28）。
+ * 三档门控 + 面板交互）。
  *
  * 目标：左侧会话行「…」菜单里保留一项「记忆参与」（带状态后缀），点击弹出一个
  * 插件自有 DOM 面板（不是子菜单——不赌宿主 Menu 组件的嵌套支持），内含三档独立
@@ -45,7 +45,7 @@ const ROW_ACTIONS_SEL = '[class*="_rowActions"]'
 export const SESSION_ROW_SEL = '[role="treeitem"][class*="_sessionRow"]'
 /** 菜单打开中的会话行：dsh Rows.tsx 把 menuOpen 状态同时挂到行级 menuOpen 类——
  *  据此可在任意时刻确定「哪个会话的菜单正开着」，不依赖点击时间窗。
- *  必须叠加 _sessionRow 约束（issue #8 回归）：工作区行（projectRow）同样是
+ *  必须叠加 _sessionRow 约束（回归）：工作区行（projectRow）同样是
  *  `role="treeitem"` 且共用同一 CSS Modules 的 _menuOpen 类——无 _sessionRow
  *  约束时，工作区菜单打开也会被解析成"会话菜单"，注入项落 workspace id
  *  （点击无反应 + 垃圾数据落库）。 */
@@ -122,7 +122,7 @@ export function retitleLeaf(root: Element, text: string): boolean {
  * 解析「当前开着的会话菜单」属于哪个会话：优先读 menuOpen 行（确定性锚点，
  * dsh Rows.tsx 在菜单打开期间给行挂 menuOpen 类），行存在但 fiber 读失败时
  * 退回点击时捕获的 id；页面上**没有** menuOpen 会话行时返回 null——此时开着的
- * 菜单若存在必属非会话行（工作区行同样挂 menuOpen，issue #8），绝不能把点击
+ * 菜单若存在必属非会话行（工作区行同样挂 menuOpen），绝不能把点击
  * 窗口残留的会话 id 注进别行的菜单（1.5s 内先点会话 … 再开工作区菜单的串味
  * 防护）。menuOpen 锚点整体失效（dsh 改类名）时本功能降级为不注入——好过
  * 错注入 + 垃圾数据落库。
@@ -192,7 +192,7 @@ export function injectSkipItem(menu: Element, sessionId: string, host: SkipItemH
   return item
 }
 
-// ── 门控面板（issue #38 交互面）─────────────────────────────────────────────
+// ── 门控面板（交互面）─────────────────────────────────────────────
 let openPanel: HTMLElement | null = null
 let openPanelMenu: HTMLElement | null = null
 let outsideCloseHandler: ((e: PointerEvent) => void) | null = null
@@ -242,7 +242,7 @@ function buildScopePanel(sid: string, post: (field: keyof MemoryScope, value: bo
   title.append(titleText, close)
   panel.appendChild(title)
 
-  // 两个开关行（用户拍板：记忆工具默认开着不关，想限制口头告诉 AI 即可）：
+  // 两个开关行（记忆工具默认开着不关，想限制口头告诉 AI 即可）：
   // 整行可点，右侧「打开/关闭」表达当前态（打开=该能力在参与记忆）。
   const rows: Array<{ field: keyof MemoryScope; key: UiKey }> = [
     { field: 'inject', key: 'part.panel.inject' },

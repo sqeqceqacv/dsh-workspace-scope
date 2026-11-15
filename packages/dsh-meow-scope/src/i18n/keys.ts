@@ -33,7 +33,7 @@ export const UI_KEYS = [
   'notice.dream.done',
   'notice.dream.interrupted',
   // session menu
-  // memory participation gate (issue #38/#28): per-window two-gate panel
+  // memory participation gate: per-window two-gate panel
   'part.menu',
   'part.state.active',
   'part.state.writeonly',

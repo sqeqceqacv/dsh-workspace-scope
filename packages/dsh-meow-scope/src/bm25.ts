@@ -3,7 +3,7 @@
  *
  * 分词（类别路由 v0.20.0，语言无关）：CJK（汉字+假名）连续段相邻 bigram + Unicode
  * 字母/数字（\p{L}\p{N}）整词；NFKC 归一化；标点/符号/emoji 丢弃。
- * en 语言包贡献（PR #6）：en 模式下对产出 tokens 追加英语归一化（停用词过滤 +
+ * en 语言包贡献：en 模式下对产出 tokens 追加英语归一化（停用词过滤 +
  * Porter 词干还原，见下方 EN 段）；其他语言维持基线（stemming 扩展点见 prompts/README.md）。
  * 打分：标准 BM25 × 艾宾浩斯近期权重；importance≥3 或超级匹配（≥0.85×本轮
  *       最高原始分）时豁免衰减。

@@ -1,6 +1,6 @@
 # Prompt language packs
 
-meow-memory 的 prompt 文案（v0.19.0+）是**数据文件，不是代码**：一个语言一个子目录，运行时读取。添加一门语言不需要改任何代码、不需要重新编译——翻译文件、跑自查、提 PR，就完成了。
+meow-memory 的 prompt 文案是**数据文件，不是代码**：一个语言一个子目录，运行时读取。添加一门语言不需要改任何代码、不需要重新编译——翻译文件、跑自查、提 PR，就完成了。
 
 Prompt texts are **data files, not code**: one directory per language, read at runtime. Adding a language = translating files + one green self-check + a PR. No code changes, no rebuild.
 
@@ -17,7 +17,7 @@ src/prompts/
 
 **`promptLang` matches the directory name verbatim**: only `zh` and `en` are shipped. Any other value falls back to `zh` **silently**.
 
-## Slots / 槽位（8 个）
+## Slots / 槽位（10 个）
 
 | file | kind | placeholders |
 |---|---|---|
@@ -27,6 +27,8 @@ src/prompts/
 | `dream-atomic.md` | whole text | `{list}` |
 | `dream-topic.md` | whole text | `{list}` |
 | `dream-project-summary.md` | whole text | `{projects}` |
+| `theme-ask.md` | whole text | `{theme}` |
+| `first-create-notice.md` | whole text | `{dbPath}` |
 | `labels.md` | key-value lines | per key（e.g. `{label}` `{name}` `{list}` `{n}`） |
 | `tools.md` | key-value lines | — |
 
@@ -38,7 +40,7 @@ src/prompts/
 
 ## Resolution order / 读取顺序（per slot, 逐槽位）
 
-1. Instance overrides: `<home>/.dsh-meow/prompts/<lang>/<slot>.md` — users may override just the slots they care about
+1. Instance overrides: `<全局数据目录>/prompts/<lang>/<slot>.md` — 该目录由 `memory_home` 工具或插件设置决定（默认在用户主目录下）；用户可以只覆盖自己在意的槽位
 2. Built-in pack: `lib/prompts/<lang>/<slot>.md`
 3. Fallback: built-in `zh/`（最终兜底）
 
@@ -46,17 +48,21 @@ src/prompts/
 
 1. Copy the truth source: `cp -r src/prompts/zh src/prompts/<your-lang>`
 2. Translate the **values** (keys, slot filenames and `{placeholders}` stay as-is)
-3. Self-check until green: `npm run check-lang -- <your-lang>`
-   (`npm run check-lang` with no argument checks **every** pack, and `npm test` runs it —
-   a pack missing a key otherwise breaks the boot of that language's instances).
+3. Self-check before opening the PR:
+   - every slot file listed above must exist in your pack;
+   - for `labels.md` / `tools.md`, the key set must equal `zh/` **exactly** —
+     `keyedValue()` throws on a missing key, so one missing key breaks boot for
+     that language's instances.
+   - There is **no** bundled lang-checker script; diff the key lists manually,
+     e.g. `grep -o '^- [^:]*' zh/tools.md` against your pack.
 4. Open a PR 🎉
 
 ## One more thing: the tokenizer / 分词器（语言无关）
 
-`src/bm25.ts` → `tokenize()` is **language-independent since v0.20.0** (category routing): CJK runs (Han + kana) become character bigrams; any Unicode letters/digits (`\p{L}\p{N}`) form lowercased whole words; punctuation/symbols/emoji are dropped; text is NFKC-normalized (fullwidth → halfwidth, halfwidth katakana → fullwidth). The `en` language pack adds an English-only normalization pass on top of the shared tokenizer (stopword filter + Porter stemmer, `stemEn`): under `promptLang: en`, inflected queries match stored entries (`tokenizers` hits `tokenizer`).
+`src/bm25.ts` → `tokenize()` is **language-independent** (category routing): CJK runs (Han + kana) become character bigrams; any Unicode letters/digits (`\p{L}\p{N}`) form lowercased whole words; punctuation/symbols/emoji are dropped; text is NFKC-normalized (fullwidth → halfwidth, halfwidth katakana → fullwidth). The `en` language pack adds an English-only normalization pass on top of the shared tokenizer (stopword filter + Porter stemmer, `stemEn`): under `promptLang: en`, inflected queries match stored entries (`tokenizers` hits `tokenizer`).
 
 Normalization lives **only** in `tokenize()`, so both sides of a match go through it and stay consistent; keywords are still stored verbatim, they are only normalized at match time. Anything language-specific you add belongs there too. If your language needs stemming / lemmatization / its own segmentation, that function is yours to extend — PRs welcome. Keyword recall depends on query and memory entries being tokenized the same way, so this matters as much as the translations themselves.
 
 ## Config / 用户配置
 
-`promptLang` (plugin config, default `zh`) selects the directory. Change it in the plugin config if needed; there is no first-run language guide. (Since v0.20.0 the BM25 tokenizer is language-independent: entries stay searchable regardless of `promptLang`.)
+`promptLang` (plugin config, default `zh`) selects the directory. Change it in the plugin config if needed; there is no first-run language guide. (The BM25 tokenizer is language-independent: entries stay searchable regardless of `promptLang`.)

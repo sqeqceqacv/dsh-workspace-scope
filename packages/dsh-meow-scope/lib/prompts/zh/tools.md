@@ -6,7 +6,7 @@
 - memory_remember.description: 把一条值得跨会话记住的信息写入当前工作区的记忆库（SQLite，按 level 分表）。 必填参数：content（内容）/ project（归属："全局"表示本工作区跨项目通用，或具体项目名，多项目用英文逗号分隔）/ keywords（8-13 个检索关键词）/ importance（重要性评估）。缺失会报错并提示重填。 level 分类：soul=AI 自身（少用）； project=项目（项目名如 project-a/project-b）； rules=工作区设计原则/行为准则（本工作区内跨项目通用时 project 填"全局"且 importance≥2 会全量注入到首轮；这个「全局」不跨工作区；  项目特定准则填 project 参数，随 memory_project 注入；其余走检索）； fact=细碎原子事实（一句话直陈 ≤60 字）；lesson=你学到的经验（被纠正的一定记这里）； topic=话题（建议 goal 目标句，用 keywords 检索）。 铁律：用户介绍项目设计思路/框架/决策理由时，content 必须保留用户原话措辞，不要转述总结。 与已有条目高度重复会自动合并（更新而非新增）。调用成功后工具会返回确认，无需重复调用本工具。
 - memory_remember.param.content: 要记住的内容；fact/lesson 一句话 ≤60 字；topic ≤300 字；涉及用户原话必须保留措辞。
 - memory_remember.param.level: 记忆层级，默认 fact。
-- memory_remember.param.domain: 记忆用途，默认 content。content=工作区内容知识（小说设定、项目内容等，受主题 judge 约束）；tooling=当前工作区做项目时踩过的工具/环境坑（如 MCP、PowerShell、路径、插件问题），不受内容主题 judge 约束，只在本工作区使用。
+- memory_remember.param.domain: 记忆用途，默认 content。content=工作区内容知识（小说设定、项目内容等，参与主题匹配）；tooling=当前工作区做项目时踩过的工具/环境坑（如 MCP、PowerShell、路径、插件问题），不参与内容主题匹配，只在本工作区使用。
 - memory_remember.param.project: 必填。项目名（level=project 时必须是具体项目名）；本工作区内跨项目通用的信息填"全局"（不跨工作区）；同时适用于多个项目时用英文逗号分隔，如"project-a,project-b"。
 - memory_remember.param.subcategory: project 子类：overview=目标概述/structure=项目结构/decisions=技术决策/quotes=用户原话/ops=部署与数据/todo=进行中。
 - memory_remember.param.goal: 话题目标句（level=topic 建议填，如"让 project-a 集成可用"）。
@@ -49,7 +49,7 @@
 
 - memory_update.description: 更新记忆库中某条记忆（内容/重要性/状态/项目归属/话题目标句/关键词等）。 status 取值：active / stale（完结：todo 完成、话题达成目标 → stale 视为 done）/ archived（归档：软删除，不再进入默认注入和默认检索，但条目仍在库中，可用 memory_read 读取，可恢复）。
 - memory_update.param.id: 记忆 id。
-- memory_update.param.domain: 记忆用途（content/tooling）；把一条记忆改成工具经验时传 tooling，可避开内容主题 judge。
+- memory_update.param.domain: 记忆用途（content/tooling）；把一条记忆改成工具经验时传 tooling，该条不参与内容主题匹配。
 - memory_update.param.content: 新内容（topic 重写时用：起因经过发展结果 ≤300 字）。
 - memory_update.param.status: 新状态。
 - memory_update.param.importance: 新重要性（数字即可，不设上限；软引导 1-4：4=致命红线/健康安全，3=用户强调/本工作区通用，2=用户决策抽象总结，1=琐碎）。

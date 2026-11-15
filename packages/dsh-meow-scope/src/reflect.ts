@@ -4,7 +4,7 @@
  * 触发：一次任务（单个 turn）内连续 react（工具）step ≥ reflectTurns（默认 7）
  * 后，在该轮结束时触发一次；单次简单工具调用不触发。顶层会话、本 turn 未反思过、
  * 最后工具非 memory_ 系列。
- * 反思消息（用户拍板 2026-08-19 终稿）：【一】新记忆（project 列表/纠正/偏好等）、
+ * 反思消息：【一】新记忆（project 列表/纠正/偏好等）、
  * 【二】更新判断（过时/错误/完成/关键词不准反推）、【三】通用要求（subcategory/
  * 关键词 8-13/importance/收尾）。topic 归 dream 轮处理，反思不再涉及。
  */
@@ -72,7 +72,7 @@ export function scanTurn(events: readonly unknown[]): {
 /**
  * 统计当前 turn（最后一个 turn/start 之后）内「连续非 memory_ 工具 step」的最大段长。
  * 每个 tool-call 计 1 step（同一 assistant/message 内的并行调用逐个计数）；
- * memory_ 工具调用中断连续段（已主动记忆，不再反思）。用户拍板：一次任务
+ * memory_ 工具调用中断连续段（已主动记忆，不再反思）。一次任务
  * 连续 react ≥7 个工具 step 才在任务结束时触发反思。
  */
 export function consecutiveToolSteps(events: readonly unknown[]): number {
@@ -105,7 +105,7 @@ export function consecutiveToolSteps(events: readonly unknown[]): number {
 
 export function buildReflectMessage(workspace: string, turnText: string, dir = '.dsh-scope'): ReturnType<typeof createUserMessage> {
   const db = getDb(workspace, dir)
-  // 文案外置（v0.19.0）：prompts/zh/reflect.md，{projectList} 占位符填充；改文件下一次反思即生效。
+  // 文案外置：prompts/zh/reflect.md，{projectList} 占位符填充；改文件下一次反思即生效。
   const prompt = resolveSlotText('reflect', { projectList: projectNamesText(db.listProjectNames()) })
   const text = `${REFLECT_MARKER} ${prompt}`
   return createUserMessage({ content: [{ type: 'text', text }], source: PLUGIN_SOURCE })

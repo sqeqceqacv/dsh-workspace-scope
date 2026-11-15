@@ -240,7 +240,7 @@ function enhanceClone(clone: HTMLElement, node: ChatNode | undefined): void {
   // 注意：assistant 节点在 ChatNodeDataMap 注册的 kind 是 'assistant-step'（dsh 源码
   // conversation-nodes/assistant.ts），不是 'assistant'——写错则 think 增强永不生效。
   if (node.kind === 'assistant-step') {
-    // issue #2：异常数据缺 blocks 时按空数组处理，不让增强路径抛错。
+    // 异常数据缺 blocks 时按空数组处理，不让增强路径抛错。
     const blocks = (node.data as AssistantChatData).blocks ?? []
     const reasoning = blocks.filter((b): b is Extract<typeof b, { kind: 'reasoning' }> => b.kind === 'reasoning')
     const toolCalls = blocks.filter((b): b is Extract<typeof b, { kind: 'tool-call' }> => b.kind === 'tool-call')
@@ -258,7 +258,7 @@ function enhanceClone(clone: HTMLElement, node: ChatNode | undefined): void {
     })
   } else if (node.kind === 'tool-call') {
     const root = (node.data as ToolChatData).root
-    if (root === undefined) return // issue #2：异常数据无 root 时跳过增强（与 toolNameOf 同防护）
+    if (root === undefined) return // 异常数据无 root 时跳过增强（与 toolNameOf 同防护）
     const rowEl = clone.querySelector<HTMLElement>('[data-disclosure-row]')
     if (rowEl === null) return
     const name = 'name' in root ? root.name : (root.call?.name ?? root.callId)
@@ -484,7 +484,7 @@ function applyFoldState(
 /** 0.1.5 右侧 turn 导航框的内联变量（frameStyle 设置；语义命名非哈希，全文档唯一）。 */
 const TURN_NAV_FRAME_VAR = '--turn-rail-inset'
 
-/** 隐藏 turn 导航条上的 memory 轮刻度（2026-09-10 用户拍板：反思/梦境独立成轮后
+/** 隐藏 turn 导航条上的 memory 轮刻度（反思/梦境独立成轮后
  *  会在 0.1.5 右侧导航多出刻度，很困扰）。
  *  定位：宿主导航框是唯一带 --turn-rail-inset 内联变量的 nav（类名是内容哈希
  *  不可依赖，aria-label 文案随语言变）；刻度按钮的 aria-label 内插 turn 号
@@ -508,7 +508,7 @@ function applyTurnNavHiding(memoryTurns: ReadonlySet<number>): void {
 /**
  * 隐形 dock 条目：不渲染可见 UI（横条直接进消息流 DOM），只随快照驱动折叠。
  *
- * 双版本 props（2026-09-10）：
+ * 双版本 props：
  * - dsh 0.1.2 及以下：`{ session: ConversationSnapshot, input }`——session 即含
  *   `.chat` 的会话快照；
  * - dsh 0.1.3+/0.1.5：dock 条目改发 hooks（与第一方 StatsPills 同款契约）——
@@ -784,7 +784,7 @@ function makeDelegateVanishDock(
 // pending（"waiting for service: …"）。官方纪律=只 inject 必需服务，可选服务走
 // ctx 软取——applySettingsPage 双腿软取（0.1.6 走 settingsScope.bind，0.1.7 短
 // 轮询等 configForms 提供方就绪后 get(entryId) 当 scope），缺服务只降级不阻断。
-// remote.settings 进清单（2026-09-25）：设置写入失败探针要直调 remote.settings
+// remote.settings 进清单：设置写入失败探针要直调 remote.settings
 // 拿宿主拒因原文——cordis rejectGuard 按「remote.settings」复合键守卫，不声明
 // 则属性访问直接抛（ctx.get('remote') 能过、.settings 仍拦，实证）。两版宿主的
 // api-settings-controller 都提供该服务，无 pending 风险。
@@ -793,7 +793,7 @@ export const inject = ['slots', 'sessions', 'remote.settings']
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function apply(ctx: any): () => void {
   const disposers: Array<() => void> = []
-  // UI 文案层（v0.27.0）：跟随 DSH 语言设置（zh/en），并向 locale 服务注册
+  // UI 文案层：跟随 DSH 语言设置（zh/en），并向 locale 服务注册
   // 本插件的语言与字典。必须在设置页/折叠/气泡读取文案之前装好；无 locale 服务
   // 的老宿主自动降级（浏览器语言 + 内置字典），失败只告警不阻断插件。
   try {
@@ -805,7 +805,7 @@ export function apply(ctx: any): () => void {
   disposers.push(startDreamIconManager())
   // delegate 打点气泡的 dream 状态同步（SSE）：dream 完成时气泡「处理中…」→「已完成 ✓」。
   disposers.push(startDelegateStateSync())
-  // 会话「…」菜单「跳过梦境整理记忆」toggle（v0.16.0）：同上独立启动，静默降级。
+  // 会话「…」菜单「跳过梦境整理记忆」toggle：同上独立启动，静默降级。
   disposers.push(startDreamSkipManager())
   // 指令菜单 dream 行换官方脸（0.1.7 菜单 DOM 装饰；0.1.6 菜单结构不同天然不命中）。
   disposers.push(startMenuDreamFace())

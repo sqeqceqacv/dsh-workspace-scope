@@ -24,7 +24,7 @@ import { memorySwitches } from './scope.js'
 
 export type { Level }
 
-// ── 记忆门控（issue #38/#28）：host 注册工具时注入判定器 ─────────────────────
+// ── 记忆门控：host 注册工具时注入判定器 ─────────────────────
 // 读档 = skip_inject / disabledWorkspaces → search/read/findSimilar/project 拒绝；
 // 写档 = skip_write / disabledWorkspaces → remember/update 拒绝（整理轮豁免由 host
 // 侧的 refuseWrite 闭包判定——工具层不感知轮次语义）。refusal 文案随既有工具错误
@@ -50,7 +50,7 @@ function refuseOrThrow(kind: 'read' | 'write', exec: ToolRunContext): void {
   if (refusal !== null && refusal !== undefined) throw new Error(refusal)
 }
 
-// ── 参数通道兜底（issue #24）────────────────────────────────────────────────
+// ── 参数通道兜底────────────────────────────────────────────────
 // 部分宿主/模型走 XML 参数通道时，schema 声明为 array/number/boolean 的值会以
 // **字符串**形态到达 execute（用户实测：keywords 变成 '["代码审计","静态扫描"]'
 // 这类 JSON 文本，50 余次调用只有 1 次成功）。旧实现只认 Array.isArray，其余一律
@@ -127,7 +127,7 @@ export function coerceBoolean(raw: unknown): boolean {
 
 /** 检索范围过滤（查询参数）：只按 project/status/days 过滤。
  *  已见（injected+searched）与本 session 建立的记忆不再预排除——search 先全量排名，
- *  前 5 条无脑取（不排除任何记忆），第 6 名起绕开已见补齐（用户拍板 2026-08-19）。 */
+ *  前 5 条无脑取（不排除任何记忆），第 6 名起绕开已见补齐。 */
 function filterSearchable(
   rows: MemoryRow[],
   opts: { project?: string[] | null; status?: string[] | null; days?: number | null },
@@ -152,7 +152,7 @@ export function workspaceOf(exec: ToolRunContext): string | undefined {
 export function sessionIdOf(exec: ToolRunContext): string | null {
   const header = (exec.agent?.session?.header ?? {}) as { id?: unknown; parentSession?: unknown; origin?: unknown }
   const id = typeof header.id === 'string' && header.id.length > 0 ? header.id : null
-  // 子 agent（origin='subagent'）：source_session 继承母窗口（用户拍板：子 agent 写记忆归属父窗口）。
+  // 子 agent（origin='subagent'）：source_session 继承母窗口（子 agent 写记忆归属父窗口）。
   // 注意：GUI fork/续写的主会话也有 parentSession 但 origin 无——不继承（它是独立主会话）。
   if (header.origin === 'subagent' && header.parentSession !== undefined) {
     const p = header.parentSession
@@ -373,13 +373,13 @@ function rememberTool(dir: string, onWrite?: MemoryWriteNotifier): ToolDefinitio
       refuseOrThrow('write', exec)
       const parsed = args as { content?: unknown; level?: unknown; domain?: unknown; project?: unknown; subcategory?: unknown; goal?: unknown; importance?: unknown; corrected?: unknown; keywords?: unknown }
       const content = typeof parsed.content === 'string' ? parsed.content.trim() : ''
-      // 四必填：缺失逐个报错并引导重填（用户拍板 2026-08-19）。
+      // 四必填：缺失逐个报错并引导重填。
       if (content.length === 0) throw new Error(L('remember.error.content'))
       const project = typeof parsed.project === 'string' && parsed.project.trim() ? parsed.project.trim() : null
       if (project === null) throw new Error(L('remember.error.project', { global: globalProjectMarker() }))
       const keywords = normalizeKeywords(parsed.keywords)
       if (keywords.length === 0) {
-        // 区分「压根没传」与「传了但解析不出任何关键词」（issue #24）：旧实现两者都
+        // 区分「压根没传」与「传了但解析不出任何关键词」：旧实现两者都
         // 报「必填」，用户明明带了 8-13 个关键词却被告知没填，排查方向被带偏。
         const missing = parsed.keywords === undefined || parsed.keywords === null
           || (typeof parsed.keywords === 'string' && parsed.keywords.trim() === '')
@@ -463,7 +463,7 @@ function rememberTool(dir: string, onWrite?: MemoryWriteNotifier): ToolDefinitio
         if (level === 'lesson' && corrected) patch.corrected = 1
         patch.keywords = keywords // 显式关键词才覆盖合并目标（能走到这里说明关键词非空）
         db.update(level, merged.id, patch)
-        // 写痕迹（v0.23.0）：合并落库也记入 written——压缩重注入第三块回放本会话写过的记忆。
+        // 写痕迹：合并落库也记入 written——压缩重注入第三块回放本会话写过的记忆。
         markWritten(workspace, source_session ?? 'unknown', [merged.id], dir)
         // 读回合并后的实际存储结果（关键词等），让模型知道最终落库形态。
         const after = db.findById(merged.id)?.row
@@ -507,7 +507,7 @@ function rememberTool(dir: string, onWrite?: MemoryWriteNotifier): ToolDefinitio
         keywords,
         source_session,
       })
-      // 写痕迹（v0.23.0）：新建落库记入 written——压缩重注入第三块回放本会话写过的记忆。
+      // 写痕迹：新建落库记入 written——压缩重注入第三块回放本会话写过的记忆。
       markWritten(workspace, source_session ?? 'unknown', [row.id], dir)
       let outcome: MemoryWriteOutcome | void
       try {
@@ -615,7 +615,7 @@ function searchTool(dir: string): ToolDefinition {
       const db = getDb(workspace, dir)
       const sessionId = sessionIdOf(exec)
       const seen = readSeen(workspace, sessionId ?? 'unknown', dir)
-      // project/status 支持逗号多选（OR 语义，用户拍板 2026-08-19）。
+      // project/status 支持逗号多选（OR 语义）。
       const projectList = typeof parsed.project === 'string' && parsed.project.trim()
         ? parsed.project.split(',').map((s) => s.trim()).filter((s) => s.length > 0)
         : []
@@ -655,7 +655,7 @@ function searchTool(dir: string): ToolDefinition {
         created_at: r.created_at,
         updated_at: r.updated_at,
       }))
-      // 全量排名（分高到低）后分段选取（用户拍板 2026-08-19）：
+      // 全量排名（分高到低）后分段选取：
       //   前 5 条无脑取（不排除任何记忆，含已见/本 session 建立的）；
       //   第 6 名起逐个往下，绕开已见（injected+searched）的记忆补足，保证新信息。
       const ranked = search(query, docs, { k: docs.length })
@@ -871,7 +871,7 @@ function readTool(dir: string): ToolDefinition {
         return { found: false }
       }
       const { row } = found
-      // 查阅留痕（v0.17.0）：dream 第一轮清单的"查阅过"源（memory_project 全景不标记，第三轮专门复查）。
+      // 查阅留痕：dream 第一轮清单的"查阅过"源（memory_project 全景不标记，第三轮专门复查）。
       markAccessed(workspace, sessionIdOf(exec) ?? 'unknown', [row.id], dir)
       return {
         found: true,
@@ -966,8 +966,8 @@ function updateTool(dir: string, onWrite?: MemoryWriteNotifier): ToolDefinition 
         if (!cleared && !isGlobalProject(String(patch.project)) && !String(patch.project).includes(',')) setCurrentProject(workspace, sessionId ?? 'unknown', patch.project, dir)
       }
       {
-        // 空数组 / 未提供 = 不更新（用户拍板：防 AI 幻觉"不想改关键词"却传 [] 把关键词全清空）；
-        // 字符串形态经通道兜底归一后同样接受（issue #24）。
+        // 空数组 / 未提供 = 不更新（防 AI 幻觉"不想改关键词"却传 [] 把关键词全清空）；
+        // 字符串形态经通道兜底归一后同样接受。
         const kw = normalizeKeywords(parsed.keywords)
         if (kw.length > 0) patch.keywords = kw
       }
@@ -1001,7 +1001,7 @@ function updateTool(dir: string, onWrite?: MemoryWriteNotifier): ToolDefinition 
       // 记忆时间戳 = 最后更新时间：db.update 内部自动刷新 updated_at（任何 update 都刷新）。
       // patch 为空（如只想传 keywords:[] 表达"不更新"）→ 视为调用成功、无字段变化。
       const ok = Object.keys(patch).length > 0 ? db.update(found.level, found.row.id, patch) : true
-      // 写痕迹（v0.23.0）：实际落库（patch 非空且 update 成功）才记——空 patch 无字段变化不算写。
+      // 写痕迹：实际落库（patch 非空且 update 成功）才记——空 patch 无字段变化不算写。
       if (ok && Object.keys(patch).length > 0) markWritten(workspace, sessionId ?? 'unknown', [found.row.id], dir)
       let outcome: MemoryWriteOutcome | void
       if (ok && Object.keys(patch).length > 0) {
@@ -1028,7 +1028,7 @@ function updateTool(dir: string, onWrite?: MemoryWriteNotifier): ToolDefinition 
 }
 
 /**
- * memory_project：取回某项目的完整注入段落（用户拍板规格）。
+ * memory_project：取回某项目的完整注入段落。
  * - 非 todo 子标签：active 条目全部；
  * - todo 子标签：active 全部为「To do list：」+ stale（已完成）按 updated_at 取最近 5 条为「已完成：」；
  * - 组内按记忆时间戳旧→新；只拼 content 纯文本，不写复杂格式。
@@ -1072,7 +1072,7 @@ function projectTool(dir: string): ToolDefinition {
       // 锚定当前 project：用户话题切到某项目时 AI 调 memory_project → 命中检索立即跟进；"全局"与多项目不锚定。
       const sessionId = sessionIdOf(exec)
       if (!isGlobalProject(project) && !project.includes(',')) setCurrentProject(workspace, sessionId ?? 'unknown', project, dir)
-      // 查阅留痕（v0.21.0）：本会话查阅过的项目记入 sessions/<id>.json——会话压缩成功后
+      // 查阅留痕：本会话查阅过的项目记入 sessions/<id>.json——会话压缩成功后
       // 按此清单重注入项目全景。全局标记不记（markProjectQueried 内部过滤，全局层走快照）；
       // 多项目参数按逗号拆开逐个记（重注入按单项目段落拼装）。
       markProjectQueried(workspace, sessionId ?? 'unknown', project, dir)
@@ -1089,8 +1089,8 @@ function projectTool(dir: string): ToolDefinition {
   }
 }
 
-/** 全局数据目录查看/切换（用户拍板 2026-09-25）：对用户=说一句话即可换目录，
- *  零代码零重启——不依赖 dsh 0.1.7 设置页写入链（其真机写入被拒、拒因静默）。
+/** 全局数据目录查看/切换：对用户=说一句话即可换目录，
+ *  零代码零重启——不依赖宿主设置页写入链。
  *  切换=插件内部 switchHomeDir（同盘移动/跨盘复制+旧目录绝不自动删+失败留原地）。 */
 function homeTool(): ToolDefinition {
   return {

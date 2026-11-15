@@ -1,5 +1,5 @@
 /**
- * meow-memory — 会话列表 dream 小月牙图标（client 端，用户拍板 2026-08-19）。
+ * meow-memory — 会话列表 dream 小月牙图标（client 端）。
  *
  * 目标：左侧会话列表中，dream 整理过记忆且之后无新对话新信息的会话行显示
  * 淡黄色静态小月牙；dream 轮进行中显示白→金呼吸灯月牙（与 dsh 状态点并存，
@@ -18,7 +18,7 @@
  *   开始推 state:'dreaming'、dream 完成推 state:'dreamed'、会话有新活动推
  *   state:'active'（去月亮）、跳过状态翻转推 'skip'/'unskip'。
  *
- * 三态优先级（v0.18.0）：呼吸灯 dreaming > 跳过 skipped > 已整理 dreamed——
+ * 三态优先级：呼吸灯 dreaming > 跳过 skipped > 已整理 dreamed——
  * 进行中的 dream 不打断是既有语义，所以呼吸灯最优先；跳过的会话显示灰调
  * 「月牙+斜杠」（macOS 勿扰同款：斜杠穿过月牙并留缝），取消跳过后自动回落。
  *
@@ -35,7 +35,7 @@ import { subscribeDreamEvents } from './client-dream-events.ts'
 export const DREAM_ICON_ATTR = 'data-meow-dreamed'
 /** 呼吸灯月牙标记（dream 进行中）。 */
 export const DREAMING_ATTR = 'data-meow-dreaming'
-/** 灰调「月牙+斜杠」标记（自动整理已关——反思与梦境都不跑，用户拍板 2026-10-07：
+/** 灰调「月牙+斜杠」标记（自动整理已关——反思与梦境都不跑，
  *  划线月 ⟺ 跳过整理，其余状态一律正常月亮）。 */
 export const SKIPPED_ATTR = 'data-meow-skip-dream'
 
@@ -230,7 +230,7 @@ export function startDreamIconManager(): () => void {
       const data = await response.json() as { sessionIds?: unknown; scopes?: unknown }
       skippedIds.clear()
       if (Array.isArray(data.scopes)) {
-        // v0.30.0 门控明细：图标只关心整理档（用户拍板：划线月 ⟺ 跳过整理）
+        // v0.30.0 门控明细：图标只关心整理档（划线月 ⟺ 跳过整理）
         for (const sc of data.scopes as Array<{ sessionId?: unknown; dream?: unknown }>) {
           if (typeof sc.sessionId !== 'string') continue
           if (sc.dream === true) skippedIds.add(sc.sessionId)

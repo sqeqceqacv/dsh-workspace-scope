@@ -1,5 +1,5 @@
 /**
- * meow-memory — 指令菜单 dream 行换官方脸（client 端，用户拍板 2026-09-23）。
+ * meow-memory — 指令菜单 dream 行换官方脸（client 端）。
  *
  * 目标：0.1.7 的 composer `/` 指令菜单里，官方指令（压缩/权限/模型…）每行都是
  * 「图标 + 中文名 + 右对齐一句话描述」，而 dream 是宿主目录行，官方只给它
@@ -10,7 +10,7 @@
  * contribution 同名会与宿主目录行撞车直接 throw；decoration 只换行为不发行脸。
  * 插件侧唯一 conform 的路就是把自家行描一遍（meow 家传手艺，同 dream 小月牙）。
  *
- * 0.1.6 免疫（用户拍板「旧版本的别改」）：装饰只认 0.1.7 菜单的 DOM 结构特征
+ * 旧版菜单免疫：装饰只认当前宿主菜单的 DOM 结构特征
  * （容器 [data-trigger-menu] + command 源行 id 前缀 dsh-slash-option-command-），
  * 0.1.6 菜单 DOM 长得不一样，天然不命中、一个字节不动。服务端注册的
  * description 原样保留（0.1.6 菜单吃的就是它），短描述只在本装饰器里换给

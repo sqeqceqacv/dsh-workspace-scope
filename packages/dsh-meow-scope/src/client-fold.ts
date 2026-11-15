@@ -13,7 +13,7 @@
  *   ——它与正常轮工作汇报共用，藏掉会连复制/点赞行一起消失），用快照的
  *   locations.getTurn(turn) 获取。
  * 合并：同一 turn 内同 variant 的多个 prompt（dream 多组连着一个 turn，2026-09-10
- * 用户拍板「一个 dream 任务一个 turn 一根横条」）只出一条横条，锚在首个 prompt，
+ * 「一个 dream 任务一个 turn 一根横条」）只出一条横条，锚在首个 prompt，
  * 覆盖到 turn 末尾。
  * 计数：范围内 kind='tool' 节点中 memory_remember / memory_update 的调用次数。
  * 状态：范围内有 running assistant → 进行中；interrupted → 已中断；否则已完成。
@@ -84,7 +84,7 @@ function extractMetaFromSections(
 
 /** 从节点 location 提取 turn 号（unresolved/session 定位无法确定时返回 undefined，
  *  调用方对 undefined 一律跳过=不折叠保持可见）。location 与 location.turn 均做
- *  缺失防护：异常快照/版本偏差下节点可能无 location（GitHub issue #2），缺失时
+ *  缺失防护：异常快照/版本偏差下节点可能无 location，缺失时
  *  与 unresolved 同路径降级，绝不抛错——computeFoldGroups 在每次渲染都跑，一炸
  *  就是一整个会话视图。 */
 function turnOf(node: ChatNode): number | undefined {
@@ -131,11 +131,11 @@ function toolNameOf(node: ChatNode): string | undefined {
  */
 export function computeFoldGroups(snapshot: ConversationSnapshot): FoldGroup[] {
   // fail-closed：宿主快照形状变化（如旧/新 dsh 前端 chat 缺失）时降级为不折叠，
-  // 绝不抛错炸掉 dock（官方 issue #2 turnOf 同类无保护读教训）。
+  // 绝不抛错炸掉 dock（turnOf 同类无保护读的教训）。
   if (snapshot?.chat === undefined) return []
   const order = snapshot.chat.order
   const nodes = snapshot.chat.nodes
-  // 同轮同任务合并（2026-09-10）：dream 多组连在同一个 turn 里（第 0 组 followup
+  // 同轮同任务合并：dream 多组连在同一个 turn 里（第 0 组 followup
   // 另起轮，后续组 steer 连着），每个组的 prompt 都是独立 context 节点——按
   // (turn, variant) 只保留首个 prompt 作横条锚点，一组覆盖整个任务。
   // Map 保插入序 = 渲染序，天然按首个 prompt 排序。
@@ -203,7 +203,7 @@ export function memoryTurnNumbers(snapshot: ConversationSnapshot): ReadonlySet<n
 }
 
 /** 横条文案（产品 copy，经 i18n 层：跟随 DSH 语言设置 zh/en）。
- *  dream 运行期带「插话会拼进本轮」提示（issue #20，用户拍板 2026-09-20）：dream 轮
+ *  dream 运行期带「插话会拼进本轮」提示：dream 轮
  *  运行中用户插话会被宿主 steering（next-step）拼进本轮、由同一回复一起消化；横条上
  *  明说，避免"问题被吞了"的困惑。反思轮不提示——反思通常在长任务收尾排队，插话拼
  *  进去的困惑远低于 dream（整轮都在做记忆整理）。 */
@@ -247,7 +247,7 @@ export const FIRST_INJECTION_MARKER = '===== 长期记忆 ====='
 export const HIT_INJECTION_MARKER = '可能相关的记忆，仅供参考：'
 /** 注入文本与用户 prompt 的分隔标记（两种注入都以它结尾）。 */
 export const PROMPT_SEPARATOR = '本轮用户prompt：'
-/** en 语言包（v0.22.0）旧格式分隔符（labels en inject.promptLabel，逐字一致）。 */
+/** en 语言包旧格式分隔符（labels en inject.promptLabel，逐字一致）。 */
 export const EN_PROMPT_SEPARATOR = "This turn's user prompt:"
 
 export type InjectionKind = 'first' | 'hit'

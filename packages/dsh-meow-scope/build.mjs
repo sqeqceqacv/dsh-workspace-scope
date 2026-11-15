@@ -64,4 +64,24 @@ function copyPrompts(src, dest) {
 }
 copyPrompts(join(root, 'src/prompts'), join(lib, 'prompts'))
 
+// The bundle embeds the packages below verbatim. esbuild's `legalComments`
+// cannot carry their notices: the upstream lib/*.js files contain no
+// `/*! */`, `@license` or `@preserve` banners (verified), so the MIT copyright
+// and permission texts have to ship as separate files next to the artifact.
+const LICENSE_DIR = join(root, 'THIRD_PARTY_LICENSES')
+rmSync(LICENSE_DIR, { recursive: true, force: true })
+mkdirSync(LICENSE_DIR, { recursive: true })
+const BUNDLED_PACKAGES = [
+  ['@deepseek-ai/dsh-llm', 'dsh-llm.LICENSE.txt'],
+  ['@deepseek-ai/cosmokit', 'cosmokit.LICENSE.txt'],
+  ['@deepseek-ai/schemastery', 'schemastery.LICENSE.txt'],
+  ['@deepseek-ai/dsh-timeout', 'dsh-timeout.LICENSE.txt'],
+]
+for (const [pkg, filename] of BUNDLED_PACKAGES) {
+  const from = join(root, 'node_modules', ...pkg.split('/'), 'LICENSE')
+  if (!existsSync(from)) throw new Error(`third-party license missing: ${pkg} (${from})`)
+  writeFileSync(join(LICENSE_DIR, filename), readFileSync(from))
+}
+
 console.log('built', relative(root, join(lib, 'index.js')), relative(root, join(lib, 'client.js')))
+console.log('copied third-party licenses to', relative(root, LICENSE_DIR))

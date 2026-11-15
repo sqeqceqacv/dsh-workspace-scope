@@ -1,8 +1,8 @@
 /**
  * meow-memory v2 — SQLite 数据层。
  *
- * 每 level 一表（用户拍板：各层数据结构需求不同）：
- *   soul / user — 无特化列，少而精；
+ * 每 level 一表：
+ *   soul        — 无特化列，少而精；
  *   project     — project 名必填（多项目分存）+ subcategory 子类；
  *   fact        — 细碎原子事实，可选 project 归属；
  *   lesson      — corrected 标记 + 可选 project 归属；
@@ -22,13 +22,13 @@ import { fillTemplate, getPromptLang, keyedValue } from './prompt-loader.js'
 export type Level = 'soul' | 'project' | 'fact' | 'lesson' | 'topic' | 'rules'
 export type Status = 'active' | 'archived' | 'stale'
 /** What the memory is for. Tooling memories are workspace-local operational
- *  experience and bypass the content-theme judge. */
+ *  experience and are not part of content-theme matching. */
 export type Domain = 'content' | 'tooling'
 export const DOMAINS: readonly Domain[] = ['content', 'tooling']
 
 export const LEVELS: readonly Level[] = ['soul', 'project', 'fact', 'lesson', 'topic', 'rules']
 
-/** project 子类（用户拍板）：目标概述/项目结构/技术决策/用户原话/部署与数据/进行中。 */
+/** project 子类：目标概述/项目结构/技术决策/用户原话/部署与数据/进行中。 */
 export const PROJECT_SUBCATEGORIES = ['overview', 'structure', 'decisions', 'quotes', 'ops', 'todo'] as const
 export type ProjectSubcategory = (typeof PROJECT_SUBCATEGORIES)[number]
 
@@ -86,7 +86,7 @@ export function globalProjectMarker(): string {
 
 /** 全局标记的英文真值（en 语言包 labels.md 的 project.global 写法）。与中文真值一样
  *  永久认——中英混写的历史库里 "global" 曾按字面值落库，不认它就会退化成一条叫
- *  global 的假项目。2026-09-19 用户拍板：全局 / global / null 都要当全局。 */
+ *  global 的假项目。全局 / global / null 都要当全局。 */
 export const GLOBAL_PROJECT_CANON_EN = 'global'
 
 /** 是否全局标记（中文真值 + 英文真值 + 当前语言包写法：跨语言切换后新旧条目都要认）。
@@ -101,7 +101,7 @@ export function isGlobalProject(field: string | null): boolean {
 }
 
 /** 是否「全局适用」：未标记（null）、空串、任何全局标记（全局 / global / 当前语言写法）都算。
- *  首轮 rules 注入与关键词命中链路共用这一口径——2026-09-19 用户拍板「全局、global、null
+ *  首轮 rules 注入与关键词命中链路共用这一口径——「全局、global、null
  *  都注入」；修前 inject.ts 首轮过滤只认 project === null，于是按文档写"全局"的准则反而
  *  永不注入（口径 bug：父级库 15 条标"全局"的 rules 含 push 红线一直没进过首轮）。 */
 export function isGlobalScope(field: string | null): boolean {
@@ -337,7 +337,7 @@ export class MemoryDb {
   }
 
   /** 幂等升级：缺列补列；旧 UUID id 按 created_at 重排为时间前缀 id；
-   *  v0.7.0：dream_at 列并入 updated_at（记忆时间戳=最后更新时间）后删除。 */
+   *  dream_at 列并入 updated_at（记忆时间戳=最后更新时间）后删除。 */
   private upgrade(): void {
     for (const level of LEVELS) {
       const cols = new Set(
@@ -385,7 +385,7 @@ export class MemoryDb {
     if (wCols.has('dream_pending')) {
       this.db.exec(`UPDATE windows SET dream_owner = 'legacy-pending', dream_started_at = 0, dream_progress_at = 0, dream_group_idx = 0, dream_T = last_event_time WHERE dream_pending = 1 AND dream_owner IS NULL`)
     }
-    // dream_skip 表：v0.30.0 起升级为「记忆参与门控」（issue #38）——原有「跳过 dream」
+    // dream_skip 表：v0.30.0 起升级为「记忆参与门控」——原有「跳过 dream」
     // 语义显式化为 skip_dream 列，新增 skip_inject / skip_write。老库补列：存量行的
     // 语义就是「跳过 dream」（旧行仅在该语义下产生），skip_dream 补默认 1 正确。
     const sCols = new Set(
@@ -561,7 +561,7 @@ export class MemoryDb {
   }
 
   /** 可检索条目：active 全部；project.subcategory='todo' 的 stale 视为 done 参与检索。
-   *  （用户拍板：todo 过时=finish 可检索，其他类别过时不检索。） */
+   *  （todo 过时=finish 可检索，其他类别过时不检索。） */
   listSearchable(level: Level): MemoryRow[] {
     const active = this.list(level, { status: 'active' })
     if (level !== 'project') return active
@@ -708,7 +708,7 @@ export class MemoryDb {
     this.db
       .prepare(`UPDATE windows SET dream_owner = NULL, dream_started_at = NULL, dream_progress_at = NULL, dream_group_idx = NULL, dream_T = NULL, last_dream_time = ? WHERE session_id = ?`)
       .run(time, sessionId)
-    // dream 收尾（完成/中止/封存）= 本轮尝试周期结束：失败计数清零（issue #36）。
+    // dream 收尾（完成/中止/封存）= 本轮尝试周期结束：失败计数清零。
     this.clearDreamFailure(sessionId)
   }
 
@@ -723,7 +723,7 @@ export class MemoryDb {
       .run(sessionId)
   }
 
-  // ── dream 失败计数（issue #36）──────────────────────────────────────────────
+  // ── dream 失败计数──────────────────────────────────────────────
   // 存 dream_meta（KV，跨实例/重启共享）：`dreamfail_c:<sid>` = 连续失败次数、
   // `dreamfail_t:<sid>` = 计数对应的整理范围 T。T 变了（窗口有新活动 → 新一轮整理
   // 范围不同）自动从 1 重计；dream 收尾（finishDream）清零。与 releaseDream 的
@@ -800,7 +800,7 @@ export class MemoryDb {
       .run(Date.now(), sessionId).changes === 1
   }
 
-  // ── dream_skip 门控表（v0.16.0 跳过 dream → v0.30.0 升级为「记忆参与」三档门控，#38）──
+  // ── dream_skip 门控表（v0.16.0 跳过 dream → v0.30.0 升级为「记忆参与」三档门控）──
   // 一行 = 一个窗口的门控状态：skip_dream（跳过整理：自动 dream + 自动反思）、
   // skip_inject（停止读入：首轮快照/命中/重注入/search/read 等读入口）、skip_write
   // （停止写入：普通轮的 remember/update；整理轮写入跟随整理档）。三档全 false 删行。
@@ -1176,7 +1176,7 @@ export function closeAllDbs(): void {
   dbCache.clear()
 }
 
-/** 记忆库备份（issue #37 增量②）：memory.db → memory.db.bak，并保留最近 4 份 `.bak.N`。
+/** 记忆库备份（增量②）：memory.db → memory.db.bak，并保留最近 4 份 `.bak.N`。
  *  mtime 判增量（bak 不旧于数据即跳过）——WAL 模式下写入落在 -wal 文件、主库
  *  mtime 可能不动，所以取 db 与 -wal 的较新者。VACUUM INTO 不能覆盖已存在文件 →
  *  先写 .tmp 再 rename 原子替换。失败返回 false（备份是兜底措施，绝不影响主流程）。 */

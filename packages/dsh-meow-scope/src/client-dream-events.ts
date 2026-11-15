@@ -75,7 +75,7 @@ export async function pollDreamEventsOnce(): Promise<void> {
     skipped = new Set()
     scopes = new Map()
     if (Array.isArray(skipData.scopes)) {
-      // v0.30.0 三档明细（issue #38）
+      // v0.30.0 三档明细
       for (const sc of skipData.scopes as Array<{ sessionId?: unknown; dream?: unknown; inject?: unknown; write?: unknown }>) {
         if (typeof sc.sessionId !== 'string') continue
         scopes.set(sc.sessionId, { dream: sc.dream === true, inject: sc.inject === true, write: sc.write === true })
