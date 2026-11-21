@@ -1,0 +1,39 @@
+dsh-workspace-scope (工作区扩展)
+Copyright (c) 2026 dsh-workspace-scope contributors
+Licensed under the MIT License; see LICENSE.
+
+Package: @sqeqceqacv/dsh-workspace-scope
+Repository: https://github.com/sqeqceqacv/dsh-workspace-scope
+
+Attribution (three distinct parts — please keep them separate)
+--------------------------------------------------------------
+
+1. Upstream project (the fork source)
+
+   dsh-meow-memory
+   Author: Phant0Meow
+   https://github.com/Phant0Meow/dsh-meow-memory
+   Copyright (c) 2026 Phant0Meow
+   Licensed under the MIT License.
+   The original MIT license text is preserved in LICENSE-UPSTREAM (this package).
+
+   The memory implementation in this package — the prebuilt host bundle and the
+   prompt resources under lib/memory/, plus the memory client module embedded in
+   client.js — is derived from that project. It remains subject to the upstream
+   MIT license and copyright above.
+
+2. Fork modifications (this package's own work)
+
+   Copyright (c) 2026 dsh-workspace-scope contributors
+   Licensed under the MIT License (see LICENSE in this package).
+
+   The fork's added and modified code is original work by this package's
+   contributors. Its copyright is neither held by nor assigned to the upstream
+   author. The workspace policy, settings page, group/runtime tooling and global
+   rules are likewise original work under the same MIT license.
+
+3. Bundled third-party packages
+
+   The prebuilt bundles embed several MIT-licensed packages verbatim. Their
+   copyright lines and full license texts are listed in THIRD_PARTY_NOTICES.md
+   and shipped in THIRD_PARTY_LICENSES/ (this package).

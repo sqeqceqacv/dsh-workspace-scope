@@ -14,3 +14,5 @@ _tmp*
 .dsh-scope/
 *.jsonl
 *.map
+dist-npm/
+*.tgz

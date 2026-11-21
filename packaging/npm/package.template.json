@@ -1,0 +1,76 @@
+{
+  "name": "@sqeqceqacv/dsh-workspace-scope",
+  "version": "{{version}}",
+  "description": "工作区扩展：DSH 工作区级工具、规则、SOUL 与记忆策略设置（含本地记忆库）",
+  "type": "module",
+  "main": "lib/index.js",
+  "engines": {
+    "node": ">=22.15.0"
+  },
+  "author": "sqeqceqacv",
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "README.md",
+    "lib/**/*.js",
+    "lib/memory/prompts/**/*",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "LICENSE",
+    "LICENSE-UPSTREAM",
+    "NOTICE",
+    "THIRD_PARTY_NOTICES.md",
+    "THIRD_PARTY_LICENSES/**",
+    "package.json"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/dsh-system-prompt": "*",
+    "@deepseek-ai/dsh-tools": "*"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": { "optional": true },
+    "@deepseek-ai/dsh-system-prompt": { "optional": true },
+    "@deepseek-ai/dsh-tools": { "optional": true }
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sqeqceqacv/dsh-workspace-scope.git"
+  },
+  "homepage": "https://github.com/sqeqceqacv/dsh-workspace-scope#readme",
+  "bugs": {
+    "url": "https://github.com/sqeqceqacv/dsh-workspace-scope/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "workspace",
+    "memory",
+    "tools",
+    "scope"
+  ],
+  "license": "MIT"
+}

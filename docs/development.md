@@ -68,6 +68,28 @@ npm test
 - 客户端页面与真实交互仍需人工验收；
 - CI 使用 Node 22，跑上述测试（不含真实页面交互）。
 
+## 发布 npm 包
+
+仓库里有两套包名：`packages/workspace-scope` 是私有开发包 `@local/dsh-workspace-scope`，发到 npm 的是装配出来的 `@sqeqceqacv/dsh-workspace-scope`。装配**不要手工拼**，用脚本：
+
+```powershell
+node scripts/build-npm-package.mjs                     # 装配到 dist-npm/package 并打 tgz
+node scripts/build-npm-package.mjs --ref <上一版>.tgz   # 顺带与上一版逐文件比对（回归用）
+node scripts/build-npm-package.mjs --no-pack           # 只装配目录，不打包
+```
+
+脚本自动处理发行版的固定差异：模块 id / bundle 名称改用发行包名；`package.json` 换成 npm 元数据（去 `private` / `scripts`，补 `publishConfig` / `repository` / `keywords`）；`README.md`、`NOTICE`、`THIRD_PARTY_NOTICES.md` 取自 `packaging/npm/` 的模板（`{{version}}` 自动替换）；`LICENSE-UPSTREAM` 取 `packages/dsh-meow-scope/LICENSE`；第三方许可取 `packages/dsh-meow-scope/THIRD_PARTY_LICENSES/`。装配完自检：必需文件齐全、无 `@local/` 残留、无未替换占位符、无 `private` / `scripts`、无 `src/` 或 `node_modules/`。
+
+发布步骤：
+
+1. 改 `packages/workspace-scope/package.json` 的 `version`（npm 上已发布的版本永久不可覆盖，必须升号）；
+2. `node scripts/build-npm-package.mjs`
+3. `cd dist-npm\package` 然后 `npm publish --registry=https://registry.npmjs.org --access public`
+4. 打 tag 并推送：`git tag -a v<version> -m "v<version>"; git push origin v<version>`
+5. 把公共文件集同步到发布仓 `dsh-workspace-scope` 并推送（这步目前仍是手工复制，未脚本化）。
+
+`packaging/npm/` 下的三个文档是**发行版专用**，内容与仓库根的同名文件不同（面向装包的人、路径按包内布局写）。改文案时两边都要改，否则两边会漂移。
+
 ## 文档与图
 
 - `docs/images/*.png`：README 用的截图。截图里**不要出现真实工作区路径、项目名或个人记忆正文**；如无法避免，先打码再入库。
