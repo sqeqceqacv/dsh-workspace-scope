@@ -1,6 +1,25 @@
 # 变更记录
 
-本文件从 0.4.0 起开始记录；更早的历史见 git log。本项目暂不发布 npm 包，版本号对应仓库快照。
+本文件从 0.4.0 起开始记录；更早的历史见 git log。版本号对应仓库快照，0.4.1 起同步发布到 npm。
+
+## 0.4.1 — 2026-11-21
+
+首个 npm 发布版本。
+
+### 变更
+
+- 发布到 npm：`@sqeqceqacv/dsh-workspace-scope`（scoped 公开包，`publishConfig.access = public`）。
+- 包内自带 `README.md`、`LICENSE-UPSTREAM`（上游 Phant0Meow 的 MIT 原文）与 `THIRD_PARTY_LICENSES/`。
+- 通知文件改用包内相对路径（`lib/memory/…`、`THIRD_PARTY_LICENSES/…`），修正原先指向不存在文件的路径。
+- 包元数据补齐 `author` / `repository` / `homepage` / `bugs` / `keywords`，并移除无法运行的 `test:global-rules` 脚本。
+
+### 修复
+
+- 会话日志引导统一为「需用户明确同意」：`memory_project` 尾部提示与 `memory_search` 两处 hint 不再主动给出 `~/.dsh/sessions` 路径。
+- judge 判定示例去掉内部技术栈（「DSH 开发 / pwsh ACL 报错」→「后端服务开发 / 构建脚本报错」）。
+- `/rule ai on`：删除不可达的「已临时解锁」假分支（真正的解锁在命令 handler 中，会调用 `arm()`）。
+- Node 版本声明统一为 `>=22.15.0`（内嵌记忆使用 `zlib.zstdDecompressSync`）。
+- `cordis.patch.yml` 与 `lib/index.js` 去掉内部里程碑措辞（`P0 Host probe` / `P1 Host core`）。
 
 ## 0.4.0 — 2026-11-15
 

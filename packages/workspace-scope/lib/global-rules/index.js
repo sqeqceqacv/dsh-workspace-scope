@@ -361,12 +361,8 @@ export function apply(ctx, rawConfig) {
           : { kind: 'error', text: `❌ ${result.error}` };
       }
       case 'ai':
-        if (rest === 'on') {
-          if (config.gate.enabled !== true) return { kind: 'success', text: '当前未启用写入门禁（config.gate.enabled=false），AI 写工具本来就可用。' };
-          return { kind: 'success', text: '已临时解锁本会话的 AI 写入（一次性，成功写入一条后自动上锁）。' };
-        }
-        if (rest === 'off') return { kind: 'success', text: '已上锁：本会话 AI 写入已关闭。' };
-        return { kind: 'success', text: `写入门禁：${config.gate.enabled ? '已启用' : '未启用'}。用法 /rule ai on | off` };
+        // 该路径拿不到会话 id，无法调用 arm()；真正的解锁在命令 handler 中完成。
+        return { kind: 'error', text: '请在命令面板执行 /rule ai on（需要会话上下文），此处无法解锁。' };
       case 'help':
         return { kind: 'success', text: HELP };
       default:

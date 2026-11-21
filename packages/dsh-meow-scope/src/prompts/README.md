@@ -1,5 +1,7 @@
 # Prompt language packs
 
+> 说明：本文件面向**源码仓库**的贡献者。npm 包内没有 `src/prompts/`（只有编译后的 `lib/prompts/`），若你只安装了包，想改译文请回到仓库操作。
+
 meow-memory 的 prompt 文案是**数据文件，不是代码**：一个语言一个子目录，运行时读取。添加一门语言不需要改任何代码、不需要重新编译——翻译文件、跑自查、提 PR，就完成了。
 
 Prompt texts are **data files, not code**: one directory per language, read at runtime. Adding a language = translating files + one green self-check + a PR. No code changes, no rebuild.

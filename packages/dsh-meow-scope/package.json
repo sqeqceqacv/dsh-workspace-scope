@@ -6,7 +6,7 @@
   "type": "module",
   "main": "lib/index.js",
   "engines": {
-    "node": ">=22.5"
+    "node": ">=22.15.0"
   },
   "exports": {
     ".": "./lib/index.js",

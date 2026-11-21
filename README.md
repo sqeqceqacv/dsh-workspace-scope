@@ -6,7 +6,7 @@
   <img src="docs/images/settings.png" width="480" alt="工作区扩展设置页">
 </p>
 
-**v0.4.0 · 源码安装** ｜ MIT ｜ Node ≥ 22.5
+**v0.4.1 · npm 已发布** ｜ MIT ｜ Node ≥ 22.15.0
 
 > 本项目为非官方社区插件，由社区开发者独立维护，与 DeepSeek 及其关联公司无隶属、合作或背书关系；DSH 及相关商标归其权利人所有，本项目仅在描述兼容性时使用这些名称。详见 [NOTICE](NOTICE)。
 
@@ -40,13 +40,39 @@ DSH 默认把已注册的工具定义全部塞进每次请求。工具装得越�
 
 ## 快速开始
 
-前置：DeepSeek Harness Desktop 已安装、Node ≥ 22.5、`~/.dsh/profiles/desktop/` 可写。
+前置：DeepSeek Harness Desktop 已安装、Node ≥ 22.15.0、`~/.dsh/profiles/desktop/` 可写。
+
+### 方式一：从 npm 安装（推荐）
+
+编辑 `~/.dsh/profiles/desktop/package.json`，在**保留已有内容**的前提下加两项：
+
+```json
+{
+  "dependencies": {
+    "@sqeqceqacv/dsh-workspace-scope": "^0.4.1"
+  },
+  "dsh": {
+    "profile": {
+      "bundles": ["@sqeqceqacv/dsh-workspace-scope"]
+    }
+  }
+}
+```
+
+```powershell
+Set-Location "$env:USERPROFILE\.dsh\profiles\desktop"
+pnpm install
+```
+
+**完全退出并重启 DSH**；设置里出现「工作区扩展」即安装成功。
+
+### 方式二：源码安装（开发 / 调试用）
 
 ```powershell
 git clone https://github.com/sqeqceqacv/dsh-workspace-scope.git C:\path\dsh-workspace-scope
 ```
 
-然后编辑 `~/.dsh/profiles/desktop/package.json`，在**保留已有内容**的前提下加两项：
+编辑同一个 `package.json`，改用本地 link：
 
 ```json
 {
@@ -61,19 +87,17 @@ git clone https://github.com/sqeqceqacv/dsh-workspace-scope.git C:\path\dsh-work
 }
 ```
 
-最后在 profile 目录执行 `pnpm install`，**完全退出并重启 DSH**；设置里出现「工作区扩展」即安装成功。
-
 <details>
 <summary>更稳妥的步骤（含备份）</summary>
 
 1. 备份 profile：`Copy-Item "$env:USERPROFILE\.dsh\profiles\desktop\package.json" "$env:USERPROFILE\.dsh\profiles\desktop\package.json.bak"`
-2. 按上面的 JSON 片段修改 `package.json`（不要整段覆盖，保留其他依赖与 bundle）
+2. 按上面任一 JSON 片段修改 `package.json`（不要整段覆盖，保留其他依赖与 bundle）
 3. `Set-Location "$env:USERPROFILE\.dsh\profiles\desktop"; pnpm install`
 4. 完全退出并重启 DSH，打开设置确认出现「工作区扩展」
 
 </details>
 
-> v0.4.0 只提供源码安装，暂不发布 npm 包。
+> v0.4.1 起已发布 npm 包 `@sqeqceqacv/dsh-workspace-scope`；源码安装保留给需要改代码的场景。
 
 ## 界面
 
@@ -168,7 +192,7 @@ DSH 自带的是**全局**开关；本插件把粒度下沉到**工作区**，�
 - 本地 HTTP API 无额外 token，只依赖同源校验，别把 DSH 暴露到局域网；
 - 内嵌记忆 Host/Client 是编译产物，改动 `dsh-meow-scope` 源码后必须重新同步（见开发文档）；
 - CI 覆盖策略、全局 RULE 与记忆单元测试，不覆盖真实 DSH 页面交互；
-- v0.4.0 暂不提供 npm 包。
+- npm 包名为 `@sqeqceqacv/dsh-workspace-scope`（v0.4.1 起）。
 
 ## 文档与开发
 

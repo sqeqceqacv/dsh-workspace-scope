@@ -1,4 +1,4 @@
-// dsh-workspace-scope — P1 Host core.
+// dsh-workspace-scope — Host core.
 //
 // A workspace is managed only when <workspace>/.dsh-scope/policy.json exists
 // and policy.enabled !== false. Managed workspaces get:

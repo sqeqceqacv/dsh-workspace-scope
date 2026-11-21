@@ -673,7 +673,7 @@ function searchTool(dir: string): ToolDefinition {
       // 按记忆时间戳（updated_at）重排：旧→新；null 视为最旧（从未封存/更新）。
       const reordered = [...hits].sort((a, b) => (a.updated_at ?? 0) - (b.updated_at ?? 0))
       return {
-        note: '如果冲突，以最新的为准。时间戳较旧的条目可作为事情发展过程的参考。如果你确实需要更多细节，可以直接去聊天记录里搜索相关关键词。',
+        note: '如果冲突，以最新的为准。时间戳较旧的条目可作为事情发展过程的参考。如需更多细节，先询问用户是否允许查阅历史对话原文。',
         hits: reordered.map((h) => {
           const row = byId.get(h.id)
           return {
@@ -826,7 +826,7 @@ function readTool(dir: string): ToolDefinition {
       },
       render: (_args, value) => {
         const v = value as { found?: boolean; level?: unknown; domain?: unknown; title?: unknown; content?: unknown; status?: unknown; project?: unknown; goal?: unknown }
-        const hint = '如果你确实需要更多细节，可以直接去聊天记录里搜索相关关键词。'
+        const hint = '如需更多细节，先询问用户是否允许查阅历史对话原文。'
         if (!v.found) return [{ type: 'text' as const, text: `未找到该记忆。${hint}` }]
         const parts = [`[${String(v.level ?? '')}${v.domain ? `/${String(v.domain)}` : ''}] ${String(v.title ?? '')}（${String(v.status ?? '')}）`]
         if (v.project) parts.push(`项目：${String(v.project)}`)
